@@ -114,6 +114,43 @@ func TestValidateGoogleRequiresCredentials(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnknownConfigField(t *testing.T) {
+	tests := map[string][]byte{
+		"research": []byte(`research:
+  max_iteration: 7
+`),
+		"model": []byte(`model:
+  modle: gpt-4.1
+`),
+	}
+
+	for name, data := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := writeConfig(t, data)
+
+			_, err := Load(LoadOptions{Path: path})
+			if err == nil {
+				t.Fatal("Load returned nil error for unknown field, want error")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsNonPositiveTimeout(t *testing.T) {
+	for _, value := range []string{"0s", "-1s"} {
+		t.Run(value, func(t *testing.T) {
+			path := writeConfig(t, []byte(`model:
+  timeout: `+value+`
+`))
+
+			_, err := Load(LoadOptions{Path: path})
+			if err == nil {
+				t.Fatalf("Load returned nil error for timeout %s, want error", value)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsNonPositiveMaxIterationsOverride(t *testing.T) {
 	for _, value := range []int{0, -1} {
 		t.Run("value "+strconv.Itoa(value), func(t *testing.T) {
@@ -146,4 +183,14 @@ func intPtr(v int) *int {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func writeConfig(t *testing.T, data []byte) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "research.yaml")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
 }

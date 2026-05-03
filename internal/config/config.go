@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -43,7 +44,6 @@ type ModelConfig struct {
 	Model    string        `yaml:"model"`
 	BaseURL  string        `yaml:"base_url"`
 	Timeout  time.Duration `yaml:"-"`
-	RawTime  Duration      `yaml:"timeout"`
 }
 
 type SearchConfig struct {
@@ -86,7 +86,6 @@ func Defaults() Config {
 		Model: ModelConfig{
 			Provider: "openai-compatible",
 			Timeout:  60 * time.Second,
-			RawTime:  Duration{Duration: 60 * time.Second},
 		},
 		Search: SearchConfig{
 			Provider:           "mock",
@@ -115,12 +114,9 @@ func Load(opts LoadOptions) (Config, error) {
 			if opts.Explicit || !errors.Is(err, os.ErrNotExist) {
 				return Config{}, fmt.Errorf("read config %s: %w", opts.Path, err)
 			}
-		} else if err := yaml.Unmarshal(b, &cfg); err != nil {
+		} else if err := unmarshalStrict(b, &cfg); err != nil {
 			return Config{}, fmt.Errorf("parse config %s: %w", opts.Path, err)
 		}
-	}
-	if cfg.Model.RawTime.Duration != 0 {
-		cfg.Model.Timeout = cfg.Model.RawTime.Duration
 	}
 	applyEnv(&cfg)
 	applyOverrides(&cfg, opts.Overrides)
@@ -128,6 +124,54 @@ func Load(opts LoadOptions) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func unmarshalStrict(data []byte, out any) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	return decoder.Decode(out)
+}
+
+func (m *ModelConfig) UnmarshalYAML(value *yaml.Node) error {
+	allowed := map[string]struct{}{
+		"provider": {},
+		"api_key":  {},
+		"model":    {},
+		"base_url": {},
+		"timeout":  {},
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		key := value.Content[i].Value
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown model field %q", key)
+		}
+	}
+
+	type rawModelConfig struct {
+		Provider string   `yaml:"provider"`
+		APIKey   string   `yaml:"api_key"`
+		Model    string   `yaml:"model"`
+		BaseURL  string   `yaml:"base_url"`
+		Timeout  Duration `yaml:"timeout"`
+	}
+
+	raw := rawModelConfig{
+		Provider: m.Provider,
+		APIKey:   m.APIKey,
+		Model:    m.Model,
+		BaseURL:  m.BaseURL,
+		Timeout:  Duration{Duration: m.Timeout},
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	m.Provider = raw.Provider
+	m.APIKey = raw.APIKey
+	m.Model = raw.Model
+	m.BaseURL = raw.BaseURL
+	m.Timeout = raw.Timeout.Duration
+	return nil
 }
 
 func applyEnv(cfg *Config) {
@@ -166,6 +210,9 @@ func applyOverrides(cfg *Config, o Overrides) {
 func (c Config) Validate() error {
 	if c.Model.Provider != "openai-compatible" {
 		return fmt.Errorf("unsupported model provider %q", c.Model.Provider)
+	}
+	if c.Model.Timeout <= 0 {
+		return errors.New("model.timeout must be positive")
 	}
 	if c.Search.Provider != "mock" && c.Search.Provider != "google" {
 		return fmt.Errorf("unsupported search provider %q", c.Search.Provider)
