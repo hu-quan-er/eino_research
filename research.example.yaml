@@ -1,0 +1,25 @@
+model:
+  provider: openai-compatible
+  api_key: ""
+  model: gpt-4.1
+  base_url: ""
+  timeout: 60s
+
+search:
+  provider: mock
+  google:
+    api_key: ""
+    cse_id: ""
+  max_searches_per_step: 6
+  results_per_search: 5
+
+research:
+  max_iterations: 5
+  researcher_roles:
+    - background_researcher
+    - evidence_researcher
+    - counterpoint_researcher
+
+output:
+  format: markdown
+  verbose: false
