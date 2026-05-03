@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -70,7 +71,7 @@ output:
 		Overrides: Overrides{
 			Provider:      "mock",
 			OutputFormat:  "markdown",
-			MaxIterations: 9,
+			MaxIterations: intPtr(9),
 			Verbose:       boolPtr(false),
 		},
 	})
@@ -111,6 +112,36 @@ func TestValidateGoogleRequiresCredentials(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate returned nil, want missing google credentials error")
 	}
+}
+
+func TestLoadRejectsNonPositiveMaxIterationsOverride(t *testing.T) {
+	for _, value := range []int{0, -1} {
+		t.Run("value "+strconv.Itoa(value), func(t *testing.T) {
+			_, err := Load(LoadOptions{
+				Path: filepath.Join(t.TempDir(), "missing.yaml"),
+				Overrides: Overrides{
+					MaxIterations: intPtr(value),
+				},
+			})
+			if err == nil {
+				t.Fatalf("Load returned nil error for MaxIterations override %d, want error", value)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsUnsupportedModelProvider(t *testing.T) {
+	cfg := Defaults()
+	cfg.Model.Provider = "unsupported"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate returned nil, want unsupported model provider error")
+	}
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func boolPtr(v bool) *bool {

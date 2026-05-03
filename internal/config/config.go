@@ -77,7 +77,7 @@ type LoadOptions struct {
 type Overrides struct {
 	Provider      string
 	OutputFormat  string
-	MaxIterations int
+	MaxIterations *int
 	Verbose       *bool
 }
 
@@ -155,8 +155,8 @@ func applyOverrides(cfg *Config, o Overrides) {
 	if o.OutputFormat != "" {
 		cfg.Output.Format = o.OutputFormat
 	}
-	if o.MaxIterations > 0 {
-		cfg.Research.MaxIterations = o.MaxIterations
+	if o.MaxIterations != nil {
+		cfg.Research.MaxIterations = *o.MaxIterations
 	}
 	if o.Verbose != nil {
 		cfg.Output.Verbose = *o.Verbose
@@ -164,6 +164,9 @@ func applyOverrides(cfg *Config, o Overrides) {
 }
 
 func (c Config) Validate() error {
+	if c.Model.Provider != "openai-compatible" {
+		return fmt.Errorf("unsupported model provider %q", c.Model.Provider)
+	}
 	if c.Search.Provider != "mock" && c.Search.Provider != "google" {
 		return fmt.Errorf("unsupported search provider %q", c.Search.Provider)
 	}
