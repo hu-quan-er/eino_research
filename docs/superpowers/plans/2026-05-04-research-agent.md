@@ -2194,13 +2194,17 @@ func run(args []string) int {
 	if *jsonOutput {
 		format = "json"
 	}
+	var maxIterationsOverride *int
+	if flagProvided(fs, "max-iterations") {
+		maxIterationsOverride = maxIterations
+	}
 	cfg, err := appconfig.Load(appconfig.LoadOptions{
 		Path:     *configPath,
 		Explicit: *configPath != "research.yaml",
 		Overrides: appconfig.Overrides{
 			Provider:      *provider,
 			OutputFormat:  format,
-			MaxIterations: *maxIterations,
+			MaxIterations: maxIterationsOverride,
 			Verbose:       verbose,
 		},
 	})
@@ -2280,6 +2284,16 @@ func run(args []string) int {
 
 	fmt.Print(render.Markdown(result))
 	return 0
+}
+
+func flagProvided(fs *flag.FlagSet, name string) bool {
+	provided := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			provided = true
+		}
+	})
+	return provided
 }
 ```
 
