@@ -238,9 +238,9 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	if !ok {
 		return StepExecution{}, fmt.Errorf("plan not found in session")
 	}
-	plan, ok := rawPlan.(planexecute.Plan)
+	plan, ok := rawPlan.(*ResearchPlan)
 	if !ok {
-		return StepExecution{}, fmt.Errorf("session plan has unexpected type %T", rawPlan)
+		return StepExecution{}, fmt.Errorf("plan session value has type %T, want *ResearchPlan", rawPlan)
 	}
 
 	step, err := decodeResearchStep(plan.FirstStep())

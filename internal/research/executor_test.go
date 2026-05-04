@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
@@ -36,6 +40,34 @@ func (s fakeSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (Ste
 		Summary:           "combined",
 		Sources:           []search.Source{{ID: "src_1", Title: "combined", URL: "https://example.com/combined"}},
 	}, nil
+}
+
+type fakeToolCallingModel struct{}
+
+func (fakeToolCallingModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+	return schema.AssistantMessage(`{}`, nil), nil
+}
+
+func (fakeToolCallingModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage(`{}`, nil)}), nil
+}
+
+func (m fakeToolCallingModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+type fakePlan struct{}
+
+func (fakePlan) FirstStep() string {
+	return "plain step"
+}
+
+func (fakePlan) MarshalJSON() ([]byte, error) {
+	return []byte(`{"steps":["plain step"]}`), nil
+}
+
+func (fakePlan) UnmarshalJSON([]byte) error {
+	return nil
 }
 
 func TestParallelStepExecutorRunsAllResearchers(t *testing.T) {
@@ -150,6 +182,32 @@ func TestBuildDefaultResearcherRoles(t *testing.T) {
 			t.Fatalf("roles[%d] = %q, want %q", i, roles[i], want[i])
 		}
 	}
+}
+
+func TestEinoParallelExecutorRequiresResearchPlanSessionValue(t *testing.T) {
+	exec := NewEinoParallelExecutor(RunnerConfig{
+		Model:          fakeToolCallingModel{},
+		SearchProvider: search.NewMockProvider(),
+	})
+	runner := adk.NewRunner(context.Background(), adk.RunnerConfig{Agent: exec})
+
+	iter := runner.Query(context.Background(), "Should we use Eino?", adk.WithSessionValues(map[string]any{
+		planexecute.PlanSessionKey:      fakePlan{},
+		planexecute.UserInputSessionKey: []adk.Message{schema.UserMessage("Should we use Eino?")},
+	}))
+
+	var err error
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event != nil && event.Err != nil {
+			err = event.Err
+			break
+		}
+	}
+	assertErrorContains(t, err, "plan session value has type", "want *ResearchPlan")
 }
 
 func assertErrorContains(t *testing.T, err error, substrings ...string) {
