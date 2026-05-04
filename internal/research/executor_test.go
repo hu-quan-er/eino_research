@@ -139,6 +139,19 @@ func TestParallelStepExecutorFailsForNilResearcher(t *testing.T) {
 	assertErrorContains(t, err, "researcher 1", "nil")
 }
 
+func TestBuildDefaultResearcherRoles(t *testing.T) {
+	roles := DefaultResearcherRoles()
+	want := []string{"background_researcher", "evidence_researcher", "counterpoint_researcher"}
+	if len(roles) != len(want) {
+		t.Fatalf("roles length = %d, want %d", len(roles), len(want))
+	}
+	for i := range want {
+		if roles[i] != want[i] {
+			t.Fatalf("roles[%d] = %q, want %q", i, roles[i], want[i])
+		}
+	}
+}
+
 func assertErrorContains(t *testing.T, err error, substrings ...string) {
 	t.Helper()
 	if err == nil {
