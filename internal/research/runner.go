@@ -79,7 +79,8 @@ func (r *Runner) Run(ctx context.Context, question string) (result ResearchResul
 
 	adkRunner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	iterator := adkRunner.Query(ctx, question)
-	var lastContent string
+	var finalAnswer string
+	var sawFinalResponse bool
 	for {
 		event, ok := iterator.Next()
 		if !ok {
@@ -101,25 +102,15 @@ func (r *Runner) Run(ctx context.Context, question string) (result ResearchResul
 			continue
 		}
 
-		if plan, ok := parseResearchPlan(content); ok {
-			result.Plan = plan
-			continue
+		if response, ok := applyRunnerContent(&result, content); ok {
+			finalAnswer = response
+			sawFinalResponse = true
 		}
-		if step, ok := parseStepExecution(content); ok {
-			result.ExecutedSteps = append(result.ExecutedSteps, step)
-			result.Sources = search.Deduplicate(append(result.Sources, step.Sources...))
-			lastContent = content
-			continue
-		}
-		if response, ok := parsePlanExecuteResponse(content); ok {
-			lastContent = response
-			continue
-		}
-		lastContent = content
 	}
 
-	result.Answer.Markdown = lastContent
-	result.Answer.Summary = lastContent
+	if err := finalizeRunnerAnswer(&result, finalAnswer, sawFinalResponse); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -258,6 +249,35 @@ func assistantContent(event *adk.AgentEvent) (string, error) {
 		return "", nil
 	}
 	return strings.TrimSpace(msg.Content), nil
+}
+
+func applyRunnerContent(result *ResearchResult, content string) (string, bool) {
+	if plan, ok := parseResearchPlan(content); ok {
+		result.Plan = plan
+		return "", false
+	}
+	if step, ok := parseStepExecution(content); ok {
+		result.ExecutedSteps = append(result.ExecutedSteps, step)
+		result.Sources = search.Deduplicate(append(result.Sources, step.Sources...))
+		return "", false
+	}
+	if response, ok := parsePlanExecuteResponse(content); ok {
+		return response, true
+	}
+	return "", false
+}
+
+func finalizeRunnerAnswer(result *ResearchResult, finalAnswer string, sawFinalResponse bool) error {
+	finalAnswer = strings.TrimSpace(finalAnswer)
+	if !sawFinalResponse || finalAnswer == "" {
+		err := fmt.Errorf("final response not received before plan-execute loop ended; max iterations may be exhausted")
+		result.Error = &RunError{Stage: "finalize", Message: err.Error()}
+		return err
+	}
+
+	result.Answer.Markdown = finalAnswer
+	result.Answer.Summary = finalAnswer
+	return nil
 }
 
 func parseResearchPlan(content string) (ResearchPlan, bool) {

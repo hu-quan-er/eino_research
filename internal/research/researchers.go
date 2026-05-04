@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
 type AgentResearcher struct {
@@ -151,12 +152,14 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	}
 
 	content := strings.TrimSpace(resp.Content)
+	researcherSources := collectResearcherSources(in.Results)
 	var out StepExecution
 	if err := json.Unmarshal([]byte(content), &out); err != nil {
 		return StepExecution{
 			Step:              in.Step,
 			ResearcherResults: in.Results,
 			Summary:           content,
+			Sources:           researcherSources,
 		}, nil
 	}
 	if strings.TrimSpace(out.Step.Question) == "" && strings.TrimSpace(out.Step.Title) == "" {
@@ -165,8 +168,27 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	if out.ResearcherResults == nil {
 		out.ResearcherResults = in.Results
 	}
+	out.Sources = mergeSources(out.Sources, researcherSources)
 
 	return out, nil
+}
+
+func collectResearcherSources(results []ResearcherResult) []search.Source {
+	sources := make([]search.Source, 0)
+	for _, result := range results {
+		sources = append(sources, result.Sources...)
+	}
+	return search.Deduplicate(sources)
+}
+
+func mergeSources(primary, fallback []search.Source) []search.Source {
+	if len(primary) == 0 {
+		return fallback
+	}
+	if len(fallback) == 0 {
+		return search.Deduplicate(primary)
+	}
+	return search.Deduplicate(append(primary, fallback...))
 }
 
 func collectLastAssistant(iterator *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
