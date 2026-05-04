@@ -1,0 +1,57 @@
+package research
+
+import "github.com/hu-quan-er/eino_research/internal/search"
+
+type ResearchResult struct {
+	Question      string          `json:"question"`
+	Answer        Answer          `json:"answer"`
+	Plan          ResearchPlan    `json:"plan"`
+	ExecutedSteps []StepExecution `json:"executed_steps"`
+	Sources       []search.Source `json:"sources"`
+	Metadata      Metadata        `json:"metadata"`
+	Error         *RunError       `json:"error,omitempty"`
+}
+
+type Answer struct {
+	Markdown    string   `json:"markdown"`
+	Summary     string   `json:"summary"`
+	KeyFindings []string `json:"key_findings"`
+	Limitations []string `json:"limitations"`
+}
+
+type StepExecution struct {
+	Step              ResearchStep       `json:"step"`
+	ResearcherResults []ResearcherResult `json:"researcher_results"`
+	Summary           string             `json:"summary"`
+	Gaps              []string           `json:"gaps,omitempty"`
+	Sources           []search.Source    `json:"sources"`
+}
+
+type ResearcherResult struct {
+	Role     string          `json:"role"`
+	Focus    string          `json:"focus"`
+	Queries  []string        `json:"queries"`
+	Findings []Finding       `json:"findings"`
+	Sources  []search.Source `json:"sources"`
+	Errors   []string        `json:"errors,omitempty"`
+}
+
+type Finding struct {
+	Claim     string   `json:"claim"`
+	Rationale string   `json:"rationale"`
+	SourceIDs []string `json:"source_ids"`
+}
+
+type Metadata struct {
+	Model          string `json:"model"`
+	SearchProvider string `json:"search_provider"`
+	MaxIterations  int    `json:"max_iterations"`
+	StartedAt      string `json:"started_at"`
+	CompletedAt    string `json:"completed_at"`
+	DurationMS     int64  `json:"duration_ms"`
+}
+
+type RunError struct {
+	Stage   string `json:"stage"`
+	Message string `json:"message"`
+}
