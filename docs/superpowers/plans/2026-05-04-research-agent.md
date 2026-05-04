@@ -1612,6 +1612,9 @@ Expected: commit succeeds.
 - Create: `internal/research/runner.go`
 - Modify: `internal/research/executor.go`
 
+**Integration note:**
+- `ResearchPlan` uses `[]ResearchStep`, while Eino's default plan tool schema may model steps as `[]string`. When wiring `planexecute.NewPlanner` and `planexecute.NewReplanner`, use tool/schema configuration that emits structured research steps compatible with `ResearchPlan`.
+
 - [ ] **Step 1: Write compile-oriented runner tests**
 
 Append to `internal/research/executor_test.go`:
