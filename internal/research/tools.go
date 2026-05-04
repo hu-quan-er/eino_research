@@ -30,12 +30,13 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 		if limits.MaxSearchesPerStep > 0 && int(next) > limits.MaxSearchesPerStep {
 			return nil, fmt.Errorf("search limit exceeded for current step")
 		}
-		limit := input.Limit
-		if limit <= 0 {
-			limit = limits.ResultsPerSearch
+		maxResults := limits.ResultsPerSearch
+		if maxResults <= 0 {
+			maxResults = 5
 		}
-		if limit <= 0 {
-			limit = 5
+		limit := maxResults
+		if input.Limit > 0 && input.Limit < maxResults {
+			limit = input.Limit
 		}
 		return provider.Search(ctx, input.Query, limit)
 	})
