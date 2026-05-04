@@ -3,6 +3,7 @@ package research
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/hu-quan-er/eino_research/internal/search"
@@ -83,16 +84,69 @@ func TestParallelStepExecutorContinuesWhenOneResearcherFails(t *testing.T) {
 
 func TestParallelStepExecutorFailsWhenAllResearchersFail(t *testing.T) {
 	exec := NewParallelStepExecutor([]Researcher{
-		fakeResearcher{role: "background_researcher", err: errors.New("failed")},
-		fakeResearcher{role: "evidence_researcher", err: errors.New("failed")},
-		fakeResearcher{role: "counterpoint_researcher", err: errors.New("failed")},
+		fakeResearcher{role: "background_researcher", err: errors.New("background timeout")},
+		fakeResearcher{role: "evidence_researcher", err: errors.New("evidence quota exceeded")},
+		fakeResearcher{role: "counterpoint_researcher", err: errors.New("counterpoint context canceled")},
 	}, fakeSynthesizer{})
 
 	_, err := exec.ExecuteStep(context.Background(), StepExecutionInput{
 		Question: "Should we use Eino?",
 		Step:     ResearchStep{ID: "step_1", Question: "What is Eino?"},
 	})
+	assertErrorContains(t, err,
+		"all researchers failed",
+		"background_researcher",
+		"background timeout",
+		"evidence_researcher",
+		"evidence quota exceeded",
+		"counterpoint_researcher",
+		"counterpoint context canceled",
+	)
+}
+
+func TestParallelStepExecutorFailsForNilExecutor(t *testing.T) {
+	var exec *ParallelStepExecutor
+
+	_, err := exec.ExecuteStep(context.Background(), StepExecutionInput{
+		Question: "Should we use Eino?",
+		Step:     ResearchStep{ID: "step_1", Question: "What is Eino?"},
+	})
+	assertErrorContains(t, err, "executor", "nil")
+}
+
+func TestParallelStepExecutorFailsForNilSynthesizer(t *testing.T) {
+	exec := NewParallelStepExecutor([]Researcher{
+		fakeResearcher{role: "background_researcher"},
+	}, nil)
+
+	_, err := exec.ExecuteStep(context.Background(), StepExecutionInput{
+		Question: "Should we use Eino?",
+		Step:     ResearchStep{ID: "step_1", Question: "What is Eino?"},
+	})
+	assertErrorContains(t, err, "synthesizer", "nil")
+}
+
+func TestParallelStepExecutorFailsForNilResearcher(t *testing.T) {
+	exec := NewParallelStepExecutor([]Researcher{
+		fakeResearcher{role: "background_researcher"},
+		nil,
+	}, fakeSynthesizer{})
+
+	_, err := exec.ExecuteStep(context.Background(), StepExecutionInput{
+		Question: "Should we use Eino?",
+		Step:     ResearchStep{ID: "step_1", Question: "What is Eino?"},
+	})
+	assertErrorContains(t, err, "researcher 1", "nil")
+}
+
+func assertErrorContains(t *testing.T, err error, substrings ...string) {
+	t.Helper()
 	if err == nil {
-		t.Fatal("ExecuteStep returned nil error, want all researchers failed")
+		t.Fatal("error = nil, want non-nil error")
+	}
+	for _, substring := range substrings {
+		if !strings.Contains(err.Error(), substring) {
+			t.Fatalf("error = %q, want substring %q", err.Error(), substring)
+		}
 	}
 }

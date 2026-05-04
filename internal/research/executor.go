@@ -2,7 +2,9 @@ package research
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -44,7 +46,20 @@ func NewParallelStepExecutor(researchers []Researcher, synthesizer Synthesizer) 
 }
 
 func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecutionInput) (StepExecution, error) {
+	if e == nil {
+		return StepExecution{}, fmt.Errorf("parallel step executor is nil")
+	}
+	if isNilDependency(e.synthesizer) {
+		return StepExecution{}, fmt.Errorf("synthesizer is nil")
+	}
+	for i, researcher := range e.researchers {
+		if isNilDependency(researcher) {
+			return StepExecution{}, fmt.Errorf("researcher %d (%s) is nil", i, roleForIndex(i))
+		}
+	}
+
 	results := make([]ResearcherResult, len(e.researchers))
+	researcherErrors := make([]error, len(e.researchers))
 	var wg sync.WaitGroup
 
 	for i, researcher := range e.researchers {
@@ -59,6 +74,7 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 				Focus:         focus,
 			})
 			if err != nil {
+				researcherErrors[idx] = err
 				results[idx] = ResearcherResult{
 					Role:   roleForIndex(idx),
 					Focus:  focus,
@@ -78,7 +94,7 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 		}
 	}
 	if successes == 0 {
-		return StepExecution{}, fmt.Errorf("all researchers failed")
+		return StepExecution{}, allResearchersFailedError(results, researcherErrors)
 	}
 
 	return e.synthesizer.Synthesize(ctx, SynthesisInput{
@@ -87,6 +103,37 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 		ExecutedSteps: in.ExecutedSteps,
 		Results:       results,
 	})
+}
+
+func allResearchersFailedError(results []ResearcherResult, researcherErrors []error) error {
+	errs := []error{errors.New("all researchers failed")}
+	for i, result := range results {
+		role := result.Role
+		if role == "" {
+			role = roleForIndex(i)
+		}
+		if i < len(researcherErrors) && researcherErrors[i] != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", role, researcherErrors[i]))
+			continue
+		}
+		for _, msg := range result.Errors {
+			errs = append(errs, fmt.Errorf("%s: %s", role, msg))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func isNilDependency(v any) bool {
+	if v == nil {
+		return true
+	}
+	value := reflect.ValueOf(v)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func roleForIndex(i int) string {
