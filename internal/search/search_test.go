@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -41,12 +42,16 @@ func TestDeduplicateSourcesByURL(t *testing.T) {
 }
 
 func TestGoogleProviderParsesResponse(t *testing.T) {
+	type requestParams struct {
+		query string
+		num   string
+	}
+	requests := make(chan requestParams, 1)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("q"); got != "eino agent" {
-			t.Fatalf("q = %q, want eino agent", got)
-		}
-		if got := r.URL.Query().Get("num"); got != "2" {
-			t.Fatalf("num = %q, want 2", got)
+		requests <- requestParams{
+			query: r.URL.Query().Get("q"),
+			num:   r.URL.Query().Get("num"),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -74,6 +79,43 @@ func TestGoogleProviderParsesResponse(t *testing.T) {
 	}
 	if got[0].Title != "One" || got[0].Provider != "google" {
 		t.Fatalf("first source = %+v", got[0])
+	}
+
+	request := <-requests
+	if request.query != "eino agent" {
+		t.Fatalf("q = %q, want eino agent", request.query)
+	}
+	if request.num != "2" {
+		t.Fatalf("num = %q, want 2", request.num)
+	}
+}
+
+func TestGoogleProviderRejectsLimitAboveAPIMaximum(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p := NewGoogleProvider(GoogleConfig{
+		APIKey:  "key",
+		CSEID:   "cx",
+		BaseURL: server.URL,
+		Client:  server.Client(),
+	})
+
+	_, err := p.Search(context.Background(), "too many", 11)
+	if err == nil {
+		t.Fatal("Search returned nil error, want limit error")
+	}
+	if !strings.Contains(err.Error(), "google") ||
+		!strings.Contains(err.Error(), "too many") ||
+		!strings.Contains(err.Error(), "1..10") {
+		t.Fatalf("error = %q, want provider, query, and limit range", err.Error())
+	}
+	if got := atomic.LoadInt32(&requests); got != 0 {
+		t.Fatalf("requests = %d, want 0", got)
 	}
 }
 

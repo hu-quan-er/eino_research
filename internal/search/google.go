@@ -9,7 +9,10 @@ import (
 	"strconv"
 )
 
-const defaultGoogleBaseURL = "https://www.googleapis.com/customsearch/v1"
+const (
+	defaultGoogleBaseURL = "https://www.googleapis.com/customsearch/v1"
+	maxGoogleSearchLimit = 10
+)
 
 type GoogleConfig struct {
 	APIKey  string
@@ -45,8 +48,8 @@ func NewGoogleProvider(cfg GoogleConfig) *GoogleProvider {
 }
 
 func (p *GoogleProvider) Search(ctx context.Context, query string, limit int) ([]Source, error) {
-	if limit <= 0 {
-		return nil, fmt.Errorf("google search query %q: limit must be positive", query)
+	if limit < 1 || limit > maxGoogleSearchLimit {
+		return nil, fmt.Errorf("google search query %q: limit %d out of range 1..10", query, limit)
 	}
 
 	endpoint, err := url.Parse(p.baseURL)
