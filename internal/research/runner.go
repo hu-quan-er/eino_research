@@ -257,8 +257,9 @@ func applyRunnerContent(result *ResearchResult, content string) (string, bool) {
 		return "", false
 	}
 	if step, ok := parseStepExecution(content); ok {
+		step = normalizeStepExecutionSources(step)
 		result.ExecutedSteps = append(result.ExecutedSteps, step)
-		result.Sources = search.Deduplicate(append(result.Sources, step.Sources...))
+		result.Sources = search.DeduplicateStable(append(result.Sources, step.Sources...))
 		return "", false
 	}
 	if response, ok := parsePlanExecuteResponse(content); ok {
@@ -285,7 +286,7 @@ func parseResearchPlan(content string) (ResearchPlan, bool) {
 	if err := json.Unmarshal([]byte(content), &plan); err != nil {
 		return ResearchPlan{}, false
 	}
-	if len(plan.Steps) == 0 {
+	if err := plan.Validate(); err != nil {
 		return ResearchPlan{}, false
 	}
 	return plan, true

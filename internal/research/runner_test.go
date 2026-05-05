@@ -13,6 +13,7 @@ func TestApplyRunnerContentDoesNotTreatStepExecutionAsFinalAnswer(t *testing.T) 
 		Step:    ResearchStep{ID: "step_1", Question: "What evidence exists?"},
 		Summary: "intermediate summary",
 		Sources: []search.Source{{
+			ID:    "step_1_src_1",
 			Title: "Evidence",
 			URL:   "https://example.com/evidence",
 		}},
@@ -37,6 +38,9 @@ func TestApplyRunnerContentDoesNotTreatStepExecutionAsFinalAnswer(t *testing.T) 
 	}
 	if len(result.Sources) != 1 {
 		t.Fatalf("sources = %d, want 1", len(result.Sources))
+	}
+	if result.Sources[0].ID != "step_1_src_1" {
+		t.Fatalf("source ID = %q, want preserved step source ID", result.Sources[0].ID)
 	}
 }
 

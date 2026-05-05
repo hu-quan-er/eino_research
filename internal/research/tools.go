@@ -3,6 +3,7 @@ package research
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -13,6 +14,7 @@ import (
 type SearchLimits struct {
 	MaxSearchesPerStep int
 	ResultsPerSearch   int
+	SourceIDPrefix     string
 }
 
 type WebSearchInput struct {
@@ -22,6 +24,7 @@ type WebSearchInput struct {
 
 func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.InvokableTool, error) {
 	var count atomic.Int64
+	var sourceCount atomic.Int64
 	return utils.InferTool("web_search", "Search the web for current research sources.", func(ctx context.Context, input WebSearchInput) ([]search.Source, error) {
 		if input.Query == "" {
 			return nil, fmt.Errorf("query is required")
@@ -38,6 +41,17 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 		if input.Limit > 0 && input.Limit < maxResults {
 			limit = input.Limit
 		}
-		return provider.Search(ctx, input.Query, limit)
+		sources, err := provider.Search(ctx, input.Query, limit)
+		if err != nil {
+			return nil, err
+		}
+		prefix := strings.TrimSpace(limits.SourceIDPrefix)
+		if prefix == "" {
+			prefix = "src"
+		}
+		for i := range sources {
+			sources[i].ID = fmt.Sprintf("%s_%d", prefix, sourceCount.Add(1))
+		}
+		return sources, nil
 	})
 }

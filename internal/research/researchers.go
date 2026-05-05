@@ -152,12 +152,12 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	}
 
 	content := strings.TrimSpace(resp.Content)
-	researcherSources := collectResearcherSources(in.Results)
+	normalizedResults, researcherSources := normalizeResearcherSources(in.Results)
 	var out StepExecution
 	if err := json.Unmarshal([]byte(content), &out); err != nil {
 		return StepExecution{
 			Step:              in.Step,
-			ResearcherResults: in.Results,
+			ResearcherResults: normalizedResults,
 			Summary:           content,
 			Sources:           researcherSources,
 		}, nil
@@ -165,20 +165,104 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	if strings.TrimSpace(out.Step.Question) == "" && strings.TrimSpace(out.Step.Title) == "" {
 		out.Step = in.Step
 	}
-	if out.ResearcherResults == nil {
-		out.ResearcherResults = in.Results
+	if len(out.ResearcherResults) == 0 {
+		out.ResearcherResults = normalizedResults
+	} else {
+		out.ResearcherResults, _ = normalizeResearcherSources(out.ResearcherResults)
 	}
-	out.Sources = mergeSources(out.Sources, researcherSources)
+	out.Sources = mergeSources(researcherSources, out.Sources)
 
 	return out, nil
 }
 
 func collectResearcherSources(results []ResearcherResult) []search.Source {
-	sources := make([]search.Source, 0)
-	for _, result := range results {
-		sources = append(sources, result.Sources...)
+	_, sources := normalizeResearcherSources(results)
+	return sources
+}
+
+func normalizeStepExecutionSources(execution StepExecution) StepExecution {
+	results, researcherSources := normalizeResearcherSources(execution.ResearcherResults)
+	execution.ResearcherResults = results
+	execution.Sources = mergeSources(researcherSources, execution.Sources)
+	return execution
+}
+
+func normalizeResearcherSources(results []ResearcherResult) ([]ResearcherResult, []search.Source) {
+	normalized := make([]ResearcherResult, len(results))
+	urlToID := make(map[string]string)
+	usedID := make(map[string]struct{})
+	allSources := make([]search.Source, 0)
+	nextID := 1
+
+	for i, result := range results {
+		idMap := make(map[string]string)
+		sourceOut := make([]search.Source, 0, len(result.Sources))
+		for _, source := range result.Sources {
+			if source.URL == "" {
+				continue
+			}
+			oldID := source.ID
+			id, ok := urlToID[source.URL]
+			if !ok {
+				id = allocateSourceID(source.ID, usedID, &nextID)
+				source.ID = id
+				urlToID[source.URL] = id
+				usedID[id] = struct{}{}
+				allSources = append(allSources, source)
+			} else {
+				source.ID = id
+			}
+			if strings.TrimSpace(oldID) != "" {
+				idMap[oldID] = id
+			}
+			sourceOut = append(sourceOut, source)
+		}
+
+		result.Sources = sourceOut
+		result.Findings = rewriteFindingsSourceIDs(result.Findings, idMap)
+		normalized[i] = result
 	}
-	return search.Deduplicate(sources)
+	return normalized, allSources
+}
+
+func allocateSourceID(candidate string, used map[string]struct{}, next *int) string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate != "" {
+		if _, ok := used[candidate]; !ok {
+			return candidate
+		}
+	}
+	for {
+		id := fmt.Sprintf("src_%d", *next)
+		*next = *next + 1
+		if _, ok := used[id]; !ok {
+			return id
+		}
+	}
+}
+
+func rewriteFindingsSourceIDs(findings []Finding, idMap map[string]string) []Finding {
+	if len(idMap) == 0 {
+		return findings
+	}
+	out := make([]Finding, len(findings))
+	for i, finding := range findings {
+		rewritten := make([]string, 0, len(finding.SourceIDs))
+		seen := make(map[string]struct{}, len(finding.SourceIDs))
+		for _, sourceID := range finding.SourceIDs {
+			if mapped, ok := idMap[sourceID]; ok {
+				sourceID = mapped
+			}
+			if _, ok := seen[sourceID]; ok {
+				continue
+			}
+			seen[sourceID] = struct{}{}
+			rewritten = append(rewritten, sourceID)
+		}
+		finding.SourceIDs = rewritten
+		out[i] = finding
+	}
+	return out
 }
 
 func mergeSources(primary, fallback []search.Source) []search.Source {
@@ -186,9 +270,9 @@ func mergeSources(primary, fallback []search.Source) []search.Source {
 		return fallback
 	}
 	if len(fallback) == 0 {
-		return search.Deduplicate(primary)
+		return search.DeduplicateStable(primary)
 	}
-	return search.Deduplicate(append(primary, fallback...))
+	return search.DeduplicateStable(append(primary, fallback...))
 }
 
 func collectLastAssistant(iterator *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {

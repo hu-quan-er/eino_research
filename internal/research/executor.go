@@ -242,6 +242,9 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	if !ok {
 		return StepExecution{}, fmt.Errorf("plan session value has type %T, want *ResearchPlan", rawPlan)
 	}
+	if err := plan.Validate(); err != nil {
+		return StepExecution{}, fmt.Errorf("invalid research plan: %w", err)
+	}
 
 	step, err := decodeResearchStep(plan.FirstStep())
 	if err != nil {
@@ -259,6 +262,7 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	searchTool, err := NewWebSearchTool(e.cfg.SearchProvider, SearchLimits{
 		MaxSearchesPerStep: e.cfg.MaxSearchesPerStep,
 		ResultsPerSearch:   e.cfg.ResultsPerSearch,
+		SourceIDPrefix:     sourceIDPrefix(step.ID),
 	})
 	if err != nil {
 		return StepExecution{}, fmt.Errorf("new web search tool: %w", err)
@@ -270,11 +274,23 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	}
 
 	executor := NewParallelStepExecutor(researchers, NewAgentSynthesizer(e.cfg.Model))
-	return executor.ExecuteStep(ctx, StepExecutionInput{
+	execution, err := executor.ExecuteStep(ctx, StepExecutionInput{
 		Question:      question,
 		Step:          step,
 		ExecutedSteps: getResearchSteps(ctx),
 	})
+	if err != nil {
+		return StepExecution{}, err
+	}
+	return normalizeStepExecutionSources(execution), nil
+}
+
+func sourceIDPrefix(stepID string) string {
+	stepID = strings.TrimSpace(stepID)
+	if stepID == "" {
+		return "src"
+	}
+	return stepID + "_src"
 }
 
 func buildResearchers(ctx context.Context, cfg RunnerConfig, searchTool tool.BaseTool) ([]Researcher, error) {

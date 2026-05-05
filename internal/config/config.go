@@ -221,6 +221,9 @@ func (c Config) Validate() error {
 		if c.Search.Google.APIKey == "" || c.Search.Google.CSEID == "" {
 			return errors.New("google search requires GOOGLE_API_KEY and GOOGLE_CSE_ID or config search.google credentials")
 		}
+		if c.Search.ResultsPerSearch > 10 {
+			return errors.New("search.results_per_search must be <= 10 for google provider")
+		}
 	}
 	if c.Output.Format != "markdown" && c.Output.Format != "json" {
 		return fmt.Errorf("unsupported output format %q", c.Output.Format)

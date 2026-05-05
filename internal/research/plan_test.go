@@ -59,3 +59,31 @@ func TestResearchPlanJSONRoundTrip(t *testing.T) {
 		t.Fatalf("Title = %q, want Evidence", decoded.Steps[0].Title)
 	}
 }
+
+func TestResearchPlanValidateRejectsEmptySteps(t *testing.T) {
+	var decoded ResearchPlan
+	if err := decoded.UnmarshalJSON([]byte(`{"steps":[]}`)); err != nil {
+		t.Fatalf("UnmarshalJSON returned error: %v", err)
+	}
+	if err := decoded.Validate(); err == nil {
+		t.Fatal("Validate returned nil, want empty steps error")
+	}
+}
+
+func TestResearchPlanValidateRejectsMissingRequiredStepFields(t *testing.T) {
+	var decoded ResearchPlan
+	err := decoded.UnmarshalJSON([]byte(`{"steps":[{"id":"step_1","title":"Evidence","question":"What evidence exists?","search_queries":[],"success_criteria":["find evidence"]}]}`))
+	if err != nil {
+		t.Fatalf("UnmarshalJSON returned error: %v", err)
+	}
+	if err := decoded.Validate(); err == nil {
+		t.Fatal("Validate returned nil, want missing search query error")
+	}
+}
+
+func TestResearchPlanUnmarshalRejectsStringSteps(t *testing.T) {
+	var decoded ResearchPlan
+	if err := decoded.UnmarshalJSON([]byte(`{"steps":["plain step"]}`)); err == nil {
+		t.Fatal("UnmarshalJSON returned nil, want string step error")
+	}
+}

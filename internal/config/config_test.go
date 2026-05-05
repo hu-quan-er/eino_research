@@ -114,6 +114,19 @@ func TestValidateGoogleRequiresCredentials(t *testing.T) {
 	}
 }
 
+func TestValidateGoogleRejectsTooManyResultsPerSearch(t *testing.T) {
+	cfg := Defaults()
+	cfg.Search.Provider = "google"
+	cfg.Search.Google.APIKey = "google-key"
+	cfg.Search.Google.CSEID = "google-cse"
+	cfg.Search.ResultsPerSearch = 11
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate returned nil, want google results_per_search limit error")
+	}
+}
+
 func TestLoadRejectsUnknownConfigField(t *testing.T) {
 	tests := map[string][]byte{
 		"research": []byte(`research:
