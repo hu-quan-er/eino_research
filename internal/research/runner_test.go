@@ -44,6 +44,53 @@ func TestApplyRunnerContentDoesNotTreatStepExecutionAsFinalAnswer(t *testing.T) 
 	}
 }
 
+func TestApplyRunnerContentPreservesDistinctStepSourceIDs(t *testing.T) {
+	result := ResearchResult{}
+	first := StepExecution{
+		Step: ResearchStep{ID: "step_1", Question: "First step"},
+		ResearcherResults: []ResearcherResult{{
+			Role: "background_researcher",
+			Findings: []Finding{{
+				Claim:     "first claim",
+				SourceIDs: []string{"step_1_src_1"},
+			}},
+			Sources: []search.Source{{
+				ID:    "step_1_src_1",
+				Title: "First",
+				URL:   "https://example.com/first",
+			}},
+		}},
+	}
+	second := StepExecution{
+		Step: ResearchStep{ID: "step_2", Question: "Second step"},
+		ResearcherResults: []ResearcherResult{{
+			Role: "evidence_researcher",
+			Findings: []Finding{{
+				Claim:     "second claim",
+				SourceIDs: []string{"step_2_src_1"},
+			}},
+			Sources: []search.Source{{
+				ID:    "step_2_src_1",
+				Title: "Second",
+				URL:   "https://example.com/second",
+			}},
+		}},
+	}
+
+	applyStepContent(t, &result, first)
+	applyStepContent(t, &result, second)
+
+	if len(result.Sources) != 2 {
+		t.Fatalf("sources = %d, want 2", len(result.Sources))
+	}
+	if result.Sources[0].ID != "step_1_src_1" || result.Sources[1].ID != "step_2_src_1" {
+		t.Fatalf("source IDs = %q, %q; want step-specific IDs", result.Sources[0].ID, result.Sources[1].ID)
+	}
+	if got := result.ExecutedSteps[1].ResearcherResults[0].Findings[0].SourceIDs[0]; got != "step_2_src_1" {
+		t.Fatalf("second finding source ID = %q, want step_2_src_1", got)
+	}
+}
+
 func TestFinalizeRunnerAnswerRequiresFinalResponse(t *testing.T) {
 	result := ResearchResult{}
 
@@ -71,5 +118,20 @@ func TestFinalizeRunnerAnswerStoresFinalResponse(t *testing.T) {
 	}
 	if result.Answer.Summary != "final answer" {
 		t.Fatalf("Answer.Summary = %q, want final answer", result.Answer.Summary)
+	}
+}
+
+func applyStepContent(t *testing.T, result *ResearchResult, step StepExecution) {
+	t.Helper()
+	b, err := json.Marshal(step)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	finalAnswer, sawFinalResponse := applyRunnerContent(result, string(b))
+	if sawFinalResponse {
+		t.Fatal("sawFinalResponse = true, want false")
+	}
+	if finalAnswer != "" {
+		t.Fatalf("finalAnswer = %q, want empty", finalAnswer)
 	}
 }

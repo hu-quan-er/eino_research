@@ -44,21 +44,27 @@ func (p ResearchPlan) Validate() error {
 	if len(p.Steps) == 0 {
 		return fmt.Errorf("research plan must include at least one step")
 	}
+	seenIDs := make(map[string]struct{}, len(p.Steps))
 	for i, step := range p.Steps {
-		if strings.TrimSpace(step.ID) == "" {
+		id := strings.TrimSpace(step.ID)
+		if id == "" {
 			return fmt.Errorf("research plan step %d id is required", i)
 		}
+		if _, ok := seenIDs[id]; ok {
+			return fmt.Errorf("research plan step id %q is duplicated", id)
+		}
+		seenIDs[id] = struct{}{}
 		if strings.TrimSpace(step.Title) == "" {
-			return fmt.Errorf("research plan step %s title is required", step.ID)
+			return fmt.Errorf("research plan step %s title is required", id)
 		}
 		if strings.TrimSpace(step.Question) == "" {
-			return fmt.Errorf("research plan step %s question is required", step.ID)
+			return fmt.Errorf("research plan step %s question is required", id)
 		}
 		if !hasNonEmptyString(step.SearchQueries) {
-			return fmt.Errorf("research plan step %s search_queries is required", step.ID)
+			return fmt.Errorf("research plan step %s search_queries is required", id)
 		}
 		if !hasNonEmptyString(step.SuccessCriteria) {
-			return fmt.Errorf("research plan step %s success_criteria is required", step.ID)
+			return fmt.Errorf("research plan step %s success_criteria is required", id)
 		}
 	}
 	return nil

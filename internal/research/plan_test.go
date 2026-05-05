@@ -81,6 +81,29 @@ func TestResearchPlanValidateRejectsMissingRequiredStepFields(t *testing.T) {
 	}
 }
 
+func TestResearchPlanValidateRejectsDuplicateStepIDs(t *testing.T) {
+	plan := ResearchPlan{Steps: []ResearchStep{
+		{
+			ID:              "step_1",
+			Title:           "Evidence",
+			Question:        "What evidence exists?",
+			SearchQueries:   []string{"evidence"},
+			SuccessCriteria: []string{"find evidence"},
+		},
+		{
+			ID:              "step_1",
+			Title:           "Counterpoint",
+			Question:        "What limitations exist?",
+			SearchQueries:   []string{"limitations"},
+			SuccessCriteria: []string{"find limitations"},
+		},
+	}}
+
+	if err := plan.Validate(); err == nil {
+		t.Fatal("Validate returned nil, want duplicate step ID error")
+	}
+}
+
 func TestResearchPlanUnmarshalRejectsStringSteps(t *testing.T) {
 	var decoded ResearchPlan
 	if err := decoded.UnmarshalJSON([]byte(`{"steps":["plain step"]}`)); err == nil {
