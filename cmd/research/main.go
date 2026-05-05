@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	appconfig "github.com/hu-quan-er/eino_research/internal/config"
@@ -42,6 +43,11 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: research [flags] \"question\"")
 		return 2
 	}
+	question := strings.TrimSpace(fs.Arg(0))
+	if question == "" {
+		fmt.Fprintln(os.Stderr, "question is required")
+		return 2
+	}
 
 	format := ""
 	if *jsonOutput {
@@ -60,7 +66,7 @@ func run(args []string) int {
 
 	cfg, err := appconfig.Load(appconfig.LoadOptions{
 		Path:     *configPath,
-		Explicit: *configPath != "research.yaml",
+		Explicit: flagProvided(fs, "config"),
 		Overrides: appconfig.Overrides{
 			Provider:      *provider,
 			OutputFormat:  format,
@@ -120,7 +126,7 @@ func run(args []string) int {
 		return 2
 	}
 
-	result, err := runner.Run(ctx, fs.Arg(0))
+	result, err := runner.Run(ctx, question)
 	if err != nil {
 		if result.Error == nil {
 			result.Error = &research.RunError{Stage: "run", Message: err.Error()}
