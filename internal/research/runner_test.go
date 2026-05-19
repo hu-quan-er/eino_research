@@ -1,11 +1,96 @@
 package research
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
+
+type staticToolCallingModel struct {
+	content string
+}
+
+func (m staticToolCallingModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	return schema.AssistantMessage(m.content, nil), nil
+}
+
+func (m staticToolCallingModel) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage(m.content, nil)}), nil
+}
+
+func (m staticToolCallingModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+func TestRunnerPlanReturnsValidatedTodoPlan(t *testing.T) {
+	planJSON, err := json.Marshal(validTodoPlan())
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	runner := newTestRunner(t, RunnerConfig{
+		Model:          staticToolCallingModel{content: string(planJSON)},
+		SearchProvider: search.NewMockProvider(),
+	})
+
+	plan, err := runner.Plan(context.Background(), "Should we use Eino?")
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Objective != validTodoPlan().Objective {
+		t.Fatalf("Objective = %q, want %q", plan.Objective, validTodoPlan().Objective)
+	}
+	if len(plan.Todos) != 3 {
+		t.Fatalf("todos = %d, want 3", len(plan.Todos))
+	}
+}
+
+func TestRunnerExecuteAggregatesTodoResultsBySection(t *testing.T) {
+	plan := validTodoPlan()
+	runner := newTestRunner(t, RunnerConfig{
+		Model:            staticToolCallingModel{content: `{}`},
+		SearchProvider:   search.NewMockProvider(),
+		MaxParallelTodos: 2,
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{
+				Todo:    in.Todo,
+				Status:  TodoDone,
+				Summary: in.Todo.Title + " complete",
+				Sources: []search.Source{{
+					ID:    in.Todo.ID + "_src_1",
+					Title: in.Todo.Title,
+					URL:   "https://example.com/" + in.Todo.ID,
+				}},
+			}, nil
+		},
+	})
+
+	result, err := runner.Execute(context.Background(), "Should we use Eino?", plan)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Plan.Objective != plan.Objective {
+		t.Fatalf("result plan objective = %q, want %q", result.Plan.Objective, plan.Objective)
+	}
+	if len(result.TodoExecutions) != 3 {
+		t.Fatalf("todo executions = %d, want 3", len(result.TodoExecutions))
+	}
+	if len(result.SectionExecutions) != 2 {
+		t.Fatalf("section executions = %d, want 2", len(result.SectionExecutions))
+	}
+	if len(result.SectionExecutions[0].Todos) != 1 {
+		t.Fatalf("background todos = %d, want 1", len(result.SectionExecutions[0].Todos))
+	}
+	if len(result.SectionExecutions[1].Todos) != 2 {
+		t.Fatalf("evidence todos = %d, want 2", len(result.SectionExecutions[1].Todos))
+	}
+	if len(result.Sources) != 3 {
+		t.Fatalf("sources = %d, want 3", len(result.Sources))
+	}
+}
 
 func TestApplyRunnerContentDoesNotTreatStepExecutionAsFinalAnswer(t *testing.T) {
 	result := ResearchResult{}
@@ -42,6 +127,21 @@ func TestApplyRunnerContentDoesNotTreatStepExecutionAsFinalAnswer(t *testing.T) 
 	if result.Sources[0].ID != "step_1_src_1" {
 		t.Fatalf("source ID = %q, want preserved step source ID", result.Sources[0].ID)
 	}
+}
+
+func newTestRunner(t *testing.T, cfg RunnerConfig) *Runner {
+	t.Helper()
+	if cfg.ModelName == "" {
+		cfg.ModelName = "test-model"
+	}
+	if cfg.SearchProviderName == "" {
+		cfg.SearchProviderName = "mock"
+	}
+	runner, err := NewRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	return runner
 }
 
 func TestApplyRunnerContentPreservesDistinctStepSourceIDs(t *testing.T) {

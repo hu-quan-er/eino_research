@@ -33,6 +33,48 @@ func TestMarkdownIncludesAnswerAndSources(t *testing.T) {
 	}
 }
 
+func TestMarkdownIncludesExecutionSummary(t *testing.T) {
+	result := sampleResult()
+	result.SectionExecutions = []research.SectionExecution{{
+		Section: research.ResearchSection{
+			ID:    "background",
+			Title: "Background and Definitions",
+		},
+		Todos: []research.TodoExecution{{
+			Todo: research.ResearchTodo{
+				ID:    "todo_background",
+				Title: "Clarify core terms",
+			},
+			Status: research.TodoDone,
+		}},
+	}, {
+		Section: research.ResearchSection{
+			ID:    "evidence",
+			Title: "Evidence and Cases",
+		},
+		Todos: []research.TodoExecution{{
+			Todo: research.ResearchTodo{
+				ID:    "todo_evidence",
+				Title: "Collect evidence",
+			},
+			Status: research.TodoFailed,
+		}},
+	}}
+
+	out := Markdown(result)
+	for _, want := range []string{
+		"## Execution Summary",
+		"### Background and Definitions",
+		"- done todo_background: Clarify core terms",
+		"### Evidence and Cases",
+		"- failed todo_evidence: Collect evidence",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Markdown missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestJSONIsResearchResult(t *testing.T) {
 	out, err := JSON(sampleResult())
 	if err != nil {

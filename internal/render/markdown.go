@@ -12,6 +12,7 @@ func Markdown(result research.ResearchResult) string {
 		var sb strings.Builder
 		sb.WriteString(result.Answer.Markdown)
 		sb.WriteString("\n\n")
+		appendExecutionSummary(&sb, result)
 		appendSources(&sb, result)
 		return strings.TrimSpace(sb.String()) + "\n"
 	}
@@ -23,8 +24,43 @@ func Markdown(result research.ResearchResult) string {
 	sb.WriteString("\n\n## Summary\n\n")
 	sb.WriteString(result.Answer.Summary)
 	sb.WriteString("\n\n")
+	appendExecutionSummary(&sb, result)
 	appendSources(&sb, result)
 	return strings.TrimSpace(sb.String()) + "\n"
+}
+
+func appendExecutionSummary(sb *strings.Builder, result research.ResearchResult) {
+	if len(result.SectionExecutions) == 0 {
+		return
+	}
+
+	sb.WriteString("## Execution Summary\n\n")
+	for _, section := range result.SectionExecutions {
+		title := strings.TrimSpace(section.Section.Title)
+		if title == "" {
+			title = section.Section.ID
+		}
+		if title == "" {
+			title = "Untitled Section"
+		}
+		sb.WriteString("### ")
+		sb.WriteString(title)
+		sb.WriteString("\n")
+		for _, todo := range section.Todos {
+			sb.WriteString(fmt.Sprintf("- %s %s: %s\n", todo.Status, todo.Todo.ID, todoSummaryTitle(todo.Todo)))
+		}
+		sb.WriteString("\n")
+	}
+}
+
+func todoSummaryTitle(todo research.ResearchTodo) string {
+	if title := strings.TrimSpace(todo.Title); title != "" {
+		return title
+	}
+	if question := strings.TrimSpace(todo.Question); question != "" {
+		return question
+	}
+	return todo.ID
 }
 
 func appendSources(sb *strings.Builder, result research.ResearchResult) {

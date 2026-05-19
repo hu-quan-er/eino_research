@@ -26,12 +26,12 @@ func TestRunExplicitConfigMissingReportsConfigError(t *testing.T) {
 	}
 }
 
-func TestRunDefaultConfigMissingContinuesToModelValidation(t *testing.T) {
+func TestRunDefaultConfigMissingWithYesContinuesToModelValidation(t *testing.T) {
 	chdir(t, t.TempDir())
 	clearConfigEnv(t)
 
 	code, stderr := captureStderr(t, func() int {
-		return run([]string{"question"})
+		return run([]string{"--yes", "question"})
 	})
 
 	if code != 2 {
@@ -42,6 +42,26 @@ func TestRunDefaultConfigMissingContinuesToModelValidation(t *testing.T) {
 	}
 	if strings.Contains(stderr, "config error") {
 		t.Fatalf("stderr = %q, want default missing config to be ignored", stderr)
+	}
+}
+
+func TestRunNonInteractiveRequiresYesOrPlanOnly(t *testing.T) {
+	chdir(t, t.TempDir())
+	clearConfigEnv(t)
+	withNonInteractiveStdin(t)
+
+	code, stderr := captureStderr(t, func() int {
+		return run([]string{"question"})
+	})
+
+	if code != 2 {
+		t.Fatalf("run returned %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "non-interactive execution requires --yes or --plan-only") {
+		t.Fatalf("stderr = %q, want non-interactive guard", stderr)
+	}
+	if strings.Contains(stderr, "model error") {
+		t.Fatalf("stderr = %q, want guard before model validation", stderr)
 	}
 }
 
@@ -76,6 +96,11 @@ func TestRunHelpReturnsZeroAndPrintsUsage(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "-config string") {
 		t.Fatalf("stderr = %q, want flag defaults", stderr)
+	}
+	for _, flag := range []string{"-yes", "-plan-only", "-plan-json", "-max-parallel"} {
+		if !strings.Contains(stderr, flag) {
+			t.Fatalf("stderr = %q, want %s flag", stderr, flag)
+		}
 	}
 }
 
@@ -121,6 +146,26 @@ func chdir(t *testing.T, dir string) {
 	t.Cleanup(func() {
 		if err := os.Chdir(oldDir); err != nil {
 			t.Errorf("restore working directory: %v", err)
+		}
+	})
+}
+
+func withNonInteractiveStdin(t *testing.T) {
+	t.Helper()
+
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdin pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		if err := r.Close(); err != nil {
+			t.Errorf("close stdin reader: %v", err)
 		}
 	})
 }

@@ -22,6 +22,9 @@ type RunnerConfig struct {
 	MaxIterations      int
 	MaxSearchesPerStep int
 	ResultsPerSearch   int
+	MaxParallelTodos   int
+	TodoExecutor       TodoExecutor
+	TodoReplanner      TodoReplanner
 }
 
 type Runner struct {
@@ -44,8 +47,90 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	if cfg.ResultsPerSearch <= 0 {
 		cfg.ResultsPerSearch = 5
 	}
+	if cfg.MaxParallelTodos <= 0 {
+		cfg.MaxParallelTodos = 1
+	}
 
 	return &Runner{cfg: cfg}, nil
+}
+
+func (r *Runner) Plan(ctx context.Context, question string) (ResearchTodoPlan, error) {
+	if strings.TrimSpace(question) == "" {
+		return ResearchTodoPlan{}, fmt.Errorf("question is required")
+	}
+
+	resp, err := r.cfg.Model.Generate(ctx, []*schema.Message{
+		schema.SystemMessage(`Create a ResearchTodoPlan JSON object. Return only JSON with objective, sections, and todos. Use 3 to 6 sections, 4 to 10 todos, dependencies only when needed, search_queries for evidence-gathering todos, and acceptance_criteria for each todo.`),
+		schema.UserMessage(question),
+	})
+	if err != nil {
+		return ResearchTodoPlan{}, err
+	}
+	if resp == nil {
+		return ResearchTodoPlan{}, fmt.Errorf("planner model response is nil")
+	}
+
+	plan, ok := parseResearchTodoPlan(resp.Content)
+	if !ok {
+		return ResearchTodoPlan{}, fmt.Errorf("planner returned invalid ResearchTodoPlan")
+	}
+	return plan, nil
+}
+
+func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodoPlan) (result ResearchResult, err error) {
+	started := time.Now()
+	result = ResearchResult{
+		Question: question,
+		Plan:     plan,
+		Metadata: Metadata{
+			Model:          r.cfg.ModelName,
+			SearchProvider: r.cfg.SearchProviderName,
+			MaxIterations:  r.cfg.MaxIterations,
+			StartedAt:      started.Format(time.RFC3339),
+		},
+	}
+	defer func() {
+		completed := time.Now()
+		result.Metadata.CompletedAt = completed.Format(time.RFC3339)
+		result.Metadata.DurationMS = completed.Sub(started).Milliseconds()
+	}()
+
+	if strings.TrimSpace(question) == "" {
+		err := fmt.Errorf("question is required")
+		result.Error = &RunError{Stage: "input", Message: err.Error()}
+		return result, err
+	}
+	if err := plan.Validate(); err != nil {
+		result.Error = &RunError{Stage: "plan", Message: err.Error()}
+		return result, err
+	}
+
+	executor := r.cfg.TodoExecutor
+	if executor == nil {
+		executor = r.executeTodo
+	}
+	scheduler, err := NewTodoScheduler(TodoSchedulerConfig{
+		MaxParallel: r.cfg.MaxParallelTodos,
+		Executor:    executor,
+		Replanner:   r.cfg.TodoReplanner,
+	})
+	if err != nil {
+		result.Error = &RunError{Stage: "scheduler", Message: err.Error()}
+		return result, err
+	}
+
+	todoExecutions, err := scheduler.Run(ctx, plan)
+	if err != nil {
+		result.Error = &RunError{Stage: "execute", Message: err.Error()}
+		return result, err
+	}
+	result.TodoExecutions = todoExecutions
+	result.SectionExecutions = groupTodoExecutionsBySection(plan, todoExecutions)
+	result.Sources = collectTodoExecutionSources(todoExecutions)
+	result.Answer.Summary = fmt.Sprintf("Completed %d todo(s).", countTodoStatus(todoExecutions, TodoDone))
+	result.Answer.Markdown = result.Answer.Summary
+
+	return result, nil
 }
 
 func (r *Runner) Run(ctx context.Context, question string) (result ResearchResult, err error) {
@@ -155,6 +240,100 @@ func (r *Runner) buildAgent(ctx context.Context) (adk.ResumableAgent, error) {
 	return agent, nil
 }
 
+func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExecution, error) {
+	sources := make([]search.Source, 0)
+	maxSearches := r.cfg.MaxSearchesPerStep
+	if maxSearches <= 0 {
+		maxSearches = 6
+	}
+	resultsPerSearch := r.cfg.ResultsPerSearch
+	if resultsPerSearch <= 0 {
+		resultsPerSearch = 5
+	}
+
+	nextSource := 1
+	for i, query := range in.Todo.SearchQueries {
+		if i >= maxSearches {
+			break
+		}
+		query = strings.TrimSpace(query)
+		if query == "" {
+			continue
+		}
+		results, err := r.cfg.SearchProvider.Search(ctx, query, resultsPerSearch)
+		if err != nil {
+			return TodoExecution{}, err
+		}
+		for _, source := range results {
+			source.ID = fmt.Sprintf("%s_src_%d", in.Todo.ID, nextSource)
+			nextSource++
+			sources = append(sources, source)
+		}
+	}
+
+	return TodoExecution{
+		Todo:    in.Todo,
+		Status:  TodoDone,
+		Summary: in.Todo.Title,
+		Sources: search.DeduplicateStable(sources),
+	}, nil
+}
+
+func groupTodoExecutionsBySection(plan ResearchTodoPlan, executions []TodoExecution) []SectionExecution {
+	byTodoID := make(map[string]TodoExecution, len(executions))
+	for _, execution := range executions {
+		byTodoID[execution.Todo.ID] = execution
+	}
+
+	sections := make([]SectionExecution, 0, len(plan.Sections))
+	for _, section := range plan.Sections {
+		sectionExecution := SectionExecution{
+			Section: section,
+		}
+		for _, todo := range plan.Todos {
+			if todo.SectionID != section.ID {
+				continue
+			}
+			execution, ok := byTodoID[todo.ID]
+			if !ok {
+				continue
+			}
+			sectionExecution.Todos = append(sectionExecution.Todos, execution)
+		}
+		sectionExecution.Summary = summarizeSectionTodos(sectionExecution.Todos)
+		sections = append(sections, sectionExecution)
+	}
+	return sections
+}
+
+func summarizeSectionTodos(executions []TodoExecution) string {
+	summaries := make([]string, 0, len(executions))
+	for _, execution := range executions {
+		if summary := strings.TrimSpace(execution.Summary); summary != "" {
+			summaries = append(summaries, summary)
+		}
+	}
+	return strings.Join(summaries, "\n")
+}
+
+func collectTodoExecutionSources(executions []TodoExecution) []search.Source {
+	sources := make([]search.Source, 0)
+	for _, execution := range executions {
+		sources = append(sources, execution.Sources...)
+	}
+	return search.DeduplicateStable(sources)
+}
+
+func countTodoStatus(executions []TodoExecution, status TodoStatus) int {
+	count := 0
+	for _, execution := range executions {
+		if execution.Status == status {
+			count++
+		}
+	}
+	return count
+}
+
 func genResearchPlannerInput(_ context.Context, userInput []adk.Message) ([]adk.Message, error) {
 	messages := []adk.Message{
 		schema.SystemMessage(`Create a concise research plan. You must call the plan tool with {"steps":[ResearchStep,...]} where each step has id, title, question, search_queries, research_axes, and success_criteria. Do not use plain string steps.`),
@@ -253,7 +432,7 @@ func assistantContent(event *adk.AgentEvent) (string, error) {
 
 func applyRunnerContent(result *ResearchResult, content string) (string, bool) {
 	if plan, ok := parseResearchPlan(content); ok {
-		result.Plan = plan
+		result.LegacyPlan = &plan
 		return "", false
 	}
 	if step, ok := parseStepExecution(content); ok {
@@ -288,6 +467,17 @@ func parseResearchPlan(content string) (ResearchPlan, bool) {
 	}
 	if err := plan.Validate(); err != nil {
 		return ResearchPlan{}, false
+	}
+	return plan, true
+}
+
+func parseResearchTodoPlan(content string) (ResearchTodoPlan, bool) {
+	var plan ResearchTodoPlan
+	if err := json.Unmarshal([]byte(content), &plan); err != nil {
+		return ResearchTodoPlan{}, false
+	}
+	if err := plan.Validate(); err != nil {
+		return ResearchTodoPlan{}, false
 	}
 	return plan, true
 }

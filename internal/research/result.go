@@ -3,13 +3,17 @@ package research
 import "github.com/hu-quan-er/eino_research/internal/search"
 
 type ResearchResult struct {
-	Question      string          `json:"question"`
-	Answer        Answer          `json:"answer"`
-	Plan          ResearchPlan    `json:"plan"`
-	ExecutedSteps []StepExecution `json:"executed_steps"`
-	Sources       []search.Source `json:"sources"`
-	Metadata      Metadata        `json:"metadata"`
-	Error         *RunError       `json:"error,omitempty"`
+	Question          string             `json:"question"`
+	Answer            Answer             `json:"answer"`
+	Plan              ResearchTodoPlan   `json:"plan"`
+	SectionExecutions []SectionExecution `json:"section_executions"`
+	TodoExecutions    []TodoExecution    `json:"todo_executions"`
+	Sources           []search.Source    `json:"sources"`
+	Metadata          Metadata           `json:"metadata"`
+	Error             *RunError          `json:"error,omitempty"`
+
+	LegacyPlan    *ResearchPlan   `json:"legacy_plan,omitempty"`
+	ExecutedSteps []StepExecution `json:"executed_steps,omitempty"`
 }
 
 type Answer struct {

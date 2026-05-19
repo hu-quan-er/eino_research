@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,6 +32,10 @@ func run(args []string) int {
 	jsonOutput := fs.Bool("json", false, "output JSON")
 	provider := fs.String("provider", "", "search provider: mock or google")
 	maxIterations := fs.Int("max-iterations", 0, "maximum plan-execute-replan iterations")
+	maxParallel := fs.Int("max-parallel", 0, "maximum runnable todos to execute concurrently")
+	yes := fs.Bool("yes", false, "skip confirmation and execute the generated plan")
+	planOnly := fs.Bool("plan-only", false, "generate and print the plan without executing")
+	planJSON := fs.Bool("plan-json", false, "with --plan-only, print ResearchTodoPlan JSON")
 	verbose := fs.Bool("verbose", false, "print progress to stderr")
 
 	if err := fs.Parse(args); err != nil {
@@ -78,6 +83,14 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		return 2
 	}
+	if *planJSON && !*planOnly {
+		fmt.Fprintln(os.Stderr, "--plan-json requires --plan-only")
+		return 2
+	}
+	if !*yes && !*planOnly && !isInteractiveStdin() {
+		fmt.Fprintln(os.Stderr, "non-interactive execution requires --yes or --plan-only")
+		return 2
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Model.Timeout)
 	defer cancel()
@@ -120,10 +133,30 @@ func run(args []string) int {
 		MaxIterations:      cfg.Research.MaxIterations,
 		MaxSearchesPerStep: cfg.Search.MaxSearchesPerStep,
 		ResultsPerSearch:   cfg.Search.ResultsPerSearch,
+		MaxParallelTodos:   *maxParallel,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "runner error: %v\n", err)
 		return 2
+	}
+
+	if *planOnly {
+		plan, err := runner.Plan(ctx, question)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "plan error: %v\n", err)
+			return 1
+		}
+		if *planJSON {
+			out, err := json.MarshalIndent(plan, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "render plan error: %v\n", err)
+				return 1
+			}
+			fmt.Println(string(out))
+			return 0
+		}
+		fmt.Print(renderTodoPlanPreview(plan))
+		return 0
 	}
 
 	result, err := runner.Run(ctx, question)
@@ -162,4 +195,45 @@ func flagProvided(fs *flag.FlagSet, name string) bool {
 		}
 	})
 	return provided
+}
+
+func isInteractiveStdin() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+func renderTodoPlanPreview(plan research.ResearchTodoPlan) string {
+	var sb strings.Builder
+	sb.WriteString("Objective: ")
+	sb.WriteString(plan.Objective)
+	sb.WriteString("\n\n")
+	for _, section := range plan.Sections {
+		sb.WriteString("## ")
+		sb.WriteString(section.Title)
+		if section.Description != "" {
+			sb.WriteString("\n")
+			sb.WriteString(section.Description)
+		}
+		sb.WriteString("\n\n")
+		for _, todo := range plan.Todos {
+			if todo.SectionID != section.ID {
+				continue
+			}
+			sb.WriteString("- ")
+			sb.WriteString(todo.ID)
+			sb.WriteString(": ")
+			sb.WriteString(todo.Title)
+			if len(todo.DependsOn) > 0 {
+				sb.WriteString(" (depends on: ")
+				sb.WriteString(strings.Join(todo.DependsOn, ", "))
+				sb.WriteString(")")
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
