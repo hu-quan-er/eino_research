@@ -31,6 +31,8 @@ type Runner struct {
 	cfg RunnerConfig
 }
 
+const researchTodoPlanToolName = "create_research_todo_plan"
+
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	if isNilDependency(cfg.Model) {
 		return nil, fmt.Errorf("model is required")
@@ -59,22 +61,85 @@ func (r *Runner) Plan(ctx context.Context, question string) (ResearchTodoPlan, e
 		return ResearchTodoPlan{}, fmt.Errorf("question is required")
 	}
 
-	resp, err := r.cfg.Model.Generate(ctx, []*schema.Message{
-		schema.SystemMessage(`Create a ResearchTodoPlan JSON object. Return only JSON with objective, sections, and todos. Use 3 to 6 sections, 4 to 10 todos, dependencies only when needed, search_queries for evidence-gathering todos, and acceptance_criteria for each todo.`),
-		schema.UserMessage(question),
-	})
+	if plan, err := r.planWithToolCall(ctx, question); err == nil {
+		return plan, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return ResearchTodoPlan{}, err
+	}
+
+	return r.planWithTextRepair(ctx, question)
+}
+
+func (r *Runner) planWithToolCall(ctx context.Context, question string) (ResearchTodoPlan, error) {
+	toolModel, err := r.cfg.Model.WithTools([]*schema.ToolInfo{researchTodoPlanToolInfo()})
+	if err != nil {
+		return ResearchTodoPlan{}, fmt.Errorf("bind planner tool: %w", err)
+	}
+
+	resp, err := toolModel.Generate(
+		ctx,
+		plannerMessages(question, "", nil),
+		model.WithToolChoice(schema.ToolChoiceForced, researchTodoPlanToolName),
+	)
 	if err != nil {
 		return ResearchTodoPlan{}, err
 	}
-	if resp == nil {
-		return ResearchTodoPlan{}, fmt.Errorf("planner model response is nil")
+	return parseResearchTodoPlanToolCall(resp)
+}
+
+func (r *Runner) planWithTextRepair(ctx context.Context, question string) (ResearchTodoPlan, error) {
+	const maxPlannerAttempts = 3
+	var lastOutput string
+	var lastErr error
+
+	for attempt := 1; attempt <= maxPlannerAttempts; attempt++ {
+		messages := plannerMessages(question, lastOutput, lastErr)
+		resp, err := r.cfg.Model.Generate(ctx, messages)
+		if err != nil {
+			return ResearchTodoPlan{}, err
+		}
+		if resp == nil {
+			lastOutput = ""
+			lastErr = fmt.Errorf("planner model response is nil")
+			continue
+		}
+
+		lastOutput = resp.Content
+		plan, err := parseResearchTodoPlan(resp.Content)
+		if err == nil {
+			return plan, nil
+		}
+		lastErr = err
 	}
 
-	plan, ok := parseResearchTodoPlan(resp.Content)
-	if !ok {
-		return ResearchTodoPlan{}, fmt.Errorf("planner returned invalid ResearchTodoPlan")
+	return ResearchTodoPlan{}, fmt.Errorf("planner output invalid after %d attempts: %w", maxPlannerAttempts, lastErr)
+}
+
+func plannerMessages(question, previousOutput string, previousErr error) []*schema.Message {
+	system := schema.SystemMessage(`Create a ResearchTodoPlan JSON object. Return only JSON with objective, sections, and todos. Use 3 to 6 sections, 4 to 10 todos, dependencies only when needed, search_queries for evidence-gathering todos, and acceptance_criteria for each todo.`)
+	if previousErr == nil {
+		return []*schema.Message{
+			system,
+			schema.UserMessage(question),
+		}
 	}
-	return plan, nil
+
+	return []*schema.Message{
+		system,
+		schema.UserMessage(fmt.Sprintf(`Original research question:
+%s
+
+Your previous planner output was invalid.
+
+Validation or parsing error:
+%s
+
+Previous output:
+%s
+
+Return only a corrected ResearchTodoPlan JSON object. Do not include markdown, explanation, or extra text.`, question, previousErr.Error(), previousOutput)),
+	}
 }
 
 func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodoPlan) (result ResearchResult, err error) {
@@ -412,6 +477,88 @@ func researchPlanToolInfo() *schema.ToolInfo {
 	}
 }
 
+func researchTodoPlanToolInfo() *schema.ToolInfo {
+	stringArray := func(desc string, required bool) *schema.ParameterInfo {
+		return &schema.ParameterInfo{
+			Type:     schema.Array,
+			ElemInfo: &schema.ParameterInfo{Type: schema.String},
+			Desc:     desc,
+			Required: required,
+		}
+	}
+	section := &schema.ParameterInfo{
+		Type: schema.Object,
+		SubParams: map[string]*schema.ParameterInfo{
+			"id": {
+				Type:     schema.String,
+				Desc:     "Stable section id such as background or evidence.",
+				Required: true,
+			},
+			"title": {
+				Type:     schema.String,
+				Desc:     "Short section title.",
+				Required: true,
+			},
+			"description": {
+				Type: schema.String,
+				Desc: "Optional section description.",
+			},
+		},
+	}
+	todo := &schema.ParameterInfo{
+		Type: schema.Object,
+		SubParams: map[string]*schema.ParameterInfo{
+			"id": {
+				Type:     schema.String,
+				Desc:     "Stable todo id such as todo_1.",
+				Required: true,
+			},
+			"section_id": {
+				Type:     schema.String,
+				Desc:     "ID of the section this todo belongs to.",
+				Required: true,
+			},
+			"title": {
+				Type:     schema.String,
+				Desc:     "Short todo title.",
+				Required: true,
+			},
+			"question": {
+				Type:     schema.String,
+				Desc:     "Specific research question to answer for this todo.",
+				Required: true,
+			},
+			"search_queries":      stringArray("Initial web search queries for evidence-gathering todos.", false),
+			"acceptance_criteria": stringArray("Concrete criteria for considering this todo complete.", true),
+			"depends_on":          stringArray("Todo ids that must complete before this todo starts.", false),
+		},
+	}
+
+	return &schema.ToolInfo{
+		Name: researchTodoPlanToolName,
+		Desc: "Create a ResearchTodoPlan. Use 3 to 6 sections and 4 to 10 todos. Todos must reference existing sections, include acceptance criteria, and use dependencies only when needed.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"objective": {
+				Type:     schema.String,
+				Desc:     "Research objective derived from the user's question.",
+				Required: true,
+			},
+			"sections": {
+				Type:     schema.Array,
+				ElemInfo: section,
+				Desc:     "Research sections that organize the todo plan.",
+				Required: true,
+			},
+			"todos": {
+				Type:     schema.Array,
+				ElemInfo: todo,
+				Desc:     "Executable research todos.",
+				Required: true,
+			},
+		}),
+	}
+}
+
 func assistantContent(event *adk.AgentEvent) (string, error) {
 	if event.Output == nil || event.Output.MessageOutput == nil {
 		return "", nil
@@ -471,15 +618,32 @@ func parseResearchPlan(content string) (ResearchPlan, bool) {
 	return plan, true
 }
 
-func parseResearchTodoPlan(content string) (ResearchTodoPlan, bool) {
+func parseResearchTodoPlan(content string) (ResearchTodoPlan, error) {
 	var plan ResearchTodoPlan
 	if err := json.Unmarshal([]byte(content), &plan); err != nil {
-		return ResearchTodoPlan{}, false
+		return ResearchTodoPlan{}, fmt.Errorf("invalid ResearchTodoPlan JSON: %w", err)
 	}
 	if err := plan.Validate(); err != nil {
-		return ResearchTodoPlan{}, false
+		return ResearchTodoPlan{}, fmt.Errorf("invalid ResearchTodoPlan: %w", err)
 	}
-	return plan, true
+	return plan, nil
+}
+
+func parseResearchTodoPlanToolCall(msg *schema.Message) (ResearchTodoPlan, error) {
+	if msg == nil {
+		return ResearchTodoPlan{}, fmt.Errorf("planner model response is nil")
+	}
+	for _, toolCall := range msg.ToolCalls {
+		if toolCall.Function.Name != researchTodoPlanToolName {
+			continue
+		}
+		plan, err := parseResearchTodoPlan(toolCall.Function.Arguments)
+		if err != nil {
+			return ResearchTodoPlan{}, fmt.Errorf("planner tool call %s returned invalid arguments: %w", researchTodoPlanToolName, err)
+		}
+		return plan, nil
+	}
+	return ResearchTodoPlan{}, fmt.Errorf("planner did not call %s", researchTodoPlanToolName)
 }
 
 func parseStepExecution(content string) (StepExecution, bool) {

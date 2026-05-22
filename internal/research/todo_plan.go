@@ -43,6 +43,12 @@ func (p ResearchTodoPlan) Validate() error {
 	if strings.TrimSpace(p.Objective) == "" {
 		return fmt.Errorf("research todo plan objective is required")
 	}
+	if len(p.Sections) == 0 {
+		return fmt.Errorf("research todo plan sections is required")
+	}
+	if len(p.Todos) == 0 {
+		return fmt.Errorf("research todo plan todos is required")
+	}
 
 	sectionIDs := make(map[string]struct{}, len(p.Sections))
 	for i, section := range p.Sections {
