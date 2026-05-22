@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +21,11 @@ import (
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
+
+var (
+	newOpenAICompatibleModel = research.NewOpenAICompatibleModel
+	stdinIsInteractive       = isInteractiveStdin
+)
 
 func run(args []string) int {
 	fs := flag.NewFlagSet("research", flag.ContinueOnError)
@@ -87,7 +94,7 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "--plan-json requires --plan-only")
 		return 2
 	}
-	if !*yes && !*planOnly && !isInteractiveStdin() {
+	if !*yes && !*planOnly && !stdinIsInteractive() {
 		fmt.Fprintln(os.Stderr, "non-interactive execution requires --yes or --plan-only")
 		return 2
 	}
@@ -110,7 +117,7 @@ func run(args []string) int {
 		return 2
 	}
 
-	model, err := research.NewOpenAICompatibleModel(ctx, research.ModelConfig{
+	model, err := newOpenAICompatibleModel(ctx, research.ModelConfig{
 		APIKey:  cfg.Model.APIKey,
 		Model:   cfg.Model.Model,
 		BaseURL: cfg.Model.BaseURL,
@@ -140,12 +147,13 @@ func run(args []string) int {
 		return 2
 	}
 
+	plan, err := runner.Plan(ctx, question)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "plan error: %v\n", err)
+		return 1
+	}
+
 	if *planOnly {
-		plan, err := runner.Plan(ctx, question)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "plan error: %v\n", err)
-			return 1
-		}
 		if *planJSON {
 			out, err := json.MarshalIndent(plan, "", "  ")
 			if err != nil {
@@ -159,7 +167,19 @@ func run(args []string) int {
 		return 0
 	}
 
-	result, err := runner.Run(ctx, question)
+	fmt.Fprint(os.Stderr, renderTodoPlanPreview(plan))
+	if !*yes {
+		confirmed, err := confirmPlanExecution()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "confirmation error: %v\n", err)
+			return 1
+		}
+		if !confirmed {
+			return 0
+		}
+	}
+
+	result, err := runner.Execute(ctx, question, plan)
 	if err != nil {
 		if result.Error == nil {
 			result.Error = &research.RunError{Stage: "run", Message: err.Error()}
@@ -203,6 +223,16 @@ func isInteractiveStdin() bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
+}
+
+func confirmPlanExecution() (bool, error) {
+	fmt.Fprint(os.Stderr, "Continue and execute this plan? [y/N] ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
 func renderTodoPlanPreview(plan research.ResearchTodoPlan) string {
