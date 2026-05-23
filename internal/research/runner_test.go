@@ -102,6 +102,40 @@ func TestRunnerPlanRepairsInvalidPlannerOutput(t *testing.T) {
 	}
 }
 
+func TestRunnerPlanRepairsLowQualityPlannerOutput(t *testing.T) {
+	lowQualityPlan := validTodoPlan()
+	lowQualityPlan.Todos[1].SearchQueries = nil
+	lowQualityPlanJSON, err := json.Marshal(lowQualityPlan)
+	if err != nil {
+		t.Fatalf("Marshal lowQualityPlan: %v", err)
+	}
+	planJSON, err := json.Marshal(validTodoPlan())
+	if err != nil {
+		t.Fatalf("Marshal valid plan: %v", err)
+	}
+	plannerModel := &staticToolCallingModel{
+		contents: []string{
+			string(lowQualityPlanJSON),
+			string(planJSON),
+		},
+	}
+	runner := newTestRunner(t, RunnerConfig{
+		Model:          plannerModel,
+		SearchProvider: search.NewMockProvider(),
+	})
+
+	plan, err := runner.Plan(context.Background(), "Should we use Eino?")
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plannerModel.calls != 2 {
+		t.Fatalf("model calls = %d, want 2", plannerModel.calls)
+	}
+	if len(plan.Todos[1].SearchQueries) == 0 {
+		t.Fatal("Plan() returned low-quality plan without repaired search queries")
+	}
+}
+
 func TestRunnerPlanReturnsLastRepairError(t *testing.T) {
 	plannerModel := &staticToolCallingModel{
 		contents: []string{

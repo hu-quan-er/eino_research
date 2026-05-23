@@ -95,3 +95,32 @@
 - 连续修复失败会返回包含最后一次校验原因的错误。
 - tool calling planner 成功时只需一次模型调用。
 - tool calling 返回不合规时会回退到文本修复路径。
+
+## PlanLinter 语义质量门禁
+
+问题：
+
+`Validate()` 只能保证结构合法，例如字段存在、依赖引用存在、依赖图无环。但 planner 仍可能输出“结构合法、执行质量差”的计划，例如 evidence todo 没有搜索 query、多个 todo 问同一个问题、synthesis todo 没依赖任何 evidence todo。
+
+选型：
+
+- 暂不引入模型 Judge，避免新增不稳定输出、额外成本和延迟。
+- 先使用规则型 `PlanLinter` 做确定性检查。
+- error 级 issue 直接进入已有 repair retry；warning 级 issue 先只保留能力，不阻断计划。
+
+已落地规则：
+
+- `section_without_todos`：section 下没有任何 todo。
+- `duplicate_todo_question`：多个 todo 使用相同问题。
+- `todo_question_too_generic`：todo question 是明显泛化占位。
+- `acceptance_criteria_too_generic`：验收标准是明显泛化占位。
+- `missing_search_queries`：证据收集类 todo 没有搜索 query。
+- `search_query_too_long`：搜索 query 过长，不适合直接检索。
+- `duplicate_search_query`：搜索 query 重复。
+- `synthesis_missing_dependencies`：综合/结论类 todo 没有依赖前置 todo。
+
+当前行为：
+
+- tool calling 和普通 JSON planner 都会经过同一套 `Validate()` + `PlanLinter`。
+- tool call arguments 如果触发 lint error，会作为上一轮 planner 输出传入 repair prompt。
+- repair 后仍会重新经过结构校验和语义 lint。

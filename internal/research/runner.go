@@ -61,20 +61,25 @@ func (r *Runner) Plan(ctx context.Context, question string) (ResearchTodoPlan, e
 		return ResearchTodoPlan{}, fmt.Errorf("question is required")
 	}
 
-	if plan, err := r.planWithToolCall(ctx, question); err == nil {
+	if plan, previousOutput, previousErr := r.planWithToolCall(ctx, question); previousErr == nil {
 		return plan, nil
+	} else if strings.TrimSpace(previousOutput) != "" {
+		if err := ctx.Err(); err != nil {
+			return ResearchTodoPlan{}, err
+		}
+		return r.planWithTextRepair(ctx, question, previousOutput, previousErr)
 	}
 	if err := ctx.Err(); err != nil {
 		return ResearchTodoPlan{}, err
 	}
 
-	return r.planWithTextRepair(ctx, question)
+	return r.planWithTextRepair(ctx, question, "", nil)
 }
 
-func (r *Runner) planWithToolCall(ctx context.Context, question string) (ResearchTodoPlan, error) {
+func (r *Runner) planWithToolCall(ctx context.Context, question string) (ResearchTodoPlan, string, error) {
 	toolModel, err := r.cfg.Model.WithTools([]*schema.ToolInfo{researchTodoPlanToolInfo()})
 	if err != nil {
-		return ResearchTodoPlan{}, fmt.Errorf("bind planner tool: %w", err)
+		return ResearchTodoPlan{}, "", fmt.Errorf("bind planner tool: %w", err)
 	}
 
 	resp, err := toolModel.Generate(
@@ -83,15 +88,15 @@ func (r *Runner) planWithToolCall(ctx context.Context, question string) (Researc
 		model.WithToolChoice(schema.ToolChoiceForced, researchTodoPlanToolName),
 	)
 	if err != nil {
-		return ResearchTodoPlan{}, err
+		return ResearchTodoPlan{}, "", err
 	}
 	return parseResearchTodoPlanToolCall(resp)
 }
 
-func (r *Runner) planWithTextRepair(ctx context.Context, question string) (ResearchTodoPlan, error) {
+func (r *Runner) planWithTextRepair(ctx context.Context, question, previousOutput string, previousErr error) (ResearchTodoPlan, error) {
 	const maxPlannerAttempts = 3
-	var lastOutput string
-	var lastErr error
+	lastOutput := previousOutput
+	lastErr := previousErr
 
 	for attempt := 1; attempt <= maxPlannerAttempts; attempt++ {
 		messages := plannerMessages(question, lastOutput, lastErr)
@@ -132,7 +137,7 @@ func plannerMessages(question, previousOutput string, previousErr error) []*sche
 
 Your previous planner output was invalid.
 
-Validation or parsing error:
+Validation, linting, or parsing error:
 %s
 
 Previous output:
@@ -626,12 +631,15 @@ func parseResearchTodoPlan(content string) (ResearchTodoPlan, error) {
 	if err := plan.Validate(); err != nil {
 		return ResearchTodoPlan{}, fmt.Errorf("invalid ResearchTodoPlan: %w", err)
 	}
+	if err := validateResearchTodoPlanQuality(plan); err != nil {
+		return ResearchTodoPlan{}, fmt.Errorf("invalid ResearchTodoPlan quality: %w", err)
+	}
 	return plan, nil
 }
 
-func parseResearchTodoPlanToolCall(msg *schema.Message) (ResearchTodoPlan, error) {
+func parseResearchTodoPlanToolCall(msg *schema.Message) (ResearchTodoPlan, string, error) {
 	if msg == nil {
-		return ResearchTodoPlan{}, fmt.Errorf("planner model response is nil")
+		return ResearchTodoPlan{}, "", fmt.Errorf("planner model response is nil")
 	}
 	for _, toolCall := range msg.ToolCalls {
 		if toolCall.Function.Name != researchTodoPlanToolName {
@@ -639,11 +647,11 @@ func parseResearchTodoPlanToolCall(msg *schema.Message) (ResearchTodoPlan, error
 		}
 		plan, err := parseResearchTodoPlan(toolCall.Function.Arguments)
 		if err != nil {
-			return ResearchTodoPlan{}, fmt.Errorf("planner tool call %s returned invalid arguments: %w", researchTodoPlanToolName, err)
+			return ResearchTodoPlan{}, toolCall.Function.Arguments, fmt.Errorf("planner tool call %s returned invalid arguments: %w", researchTodoPlanToolName, err)
 		}
-		return plan, nil
+		return plan, toolCall.Function.Arguments, nil
 	}
-	return ResearchTodoPlan{}, fmt.Errorf("planner did not call %s", researchTodoPlanToolName)
+	return ResearchTodoPlan{}, "", fmt.Errorf("planner did not call %s", researchTodoPlanToolName)
 }
 
 func parseStepExecution(content string) (StepExecution, bool) {
