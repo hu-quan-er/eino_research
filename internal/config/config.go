@@ -59,8 +59,10 @@ type GoogleSearchConfig struct {
 }
 
 type ResearchConfig struct {
-	MaxIterations   int      `yaml:"max_iterations"`
-	ResearcherRoles []string `yaml:"researcher_roles"`
+	MaxIterations             int      `yaml:"max_iterations"`
+	MaxResearchersPerTodo     int      `yaml:"max_researchers_per_todo"`
+	MaxTodoResearchIterations int      `yaml:"max_todo_research_iterations"`
+	ResearcherRoles           []string `yaml:"researcher_roles"`
 }
 
 type OutputConfig struct {
@@ -93,7 +95,9 @@ func Defaults() Config {
 			ResultsPerSearch:   5,
 		},
 		Research: ResearchConfig{
-			MaxIterations: 5,
+			MaxIterations:             5,
+			MaxResearchersPerTodo:     3,
+			MaxTodoResearchIterations: 2,
 			ResearcherRoles: []string{
 				"background_researcher",
 				"evidence_researcher",
@@ -230,6 +234,12 @@ func (c Config) Validate() error {
 	}
 	if c.Research.MaxIterations <= 0 {
 		return errors.New("research.max_iterations must be positive")
+	}
+	if c.Research.MaxResearchersPerTodo <= 0 {
+		return errors.New("research.max_researchers_per_todo must be positive")
+	}
+	if c.Research.MaxTodoResearchIterations <= 0 {
+		return errors.New("research.max_todo_research_iterations must be positive")
 	}
 	if c.Search.MaxSearchesPerStep <= 0 {
 		return errors.New("search.max_searches_per_step must be positive")

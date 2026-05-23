@@ -29,6 +29,12 @@ func TestLoadDefaultsWhenConfigMissing(t *testing.T) {
 	if cfg.Search.MaxSearchesPerStep != 6 {
 		t.Fatalf("MaxSearchesPerStep = %d, want 6", cfg.Search.MaxSearchesPerStep)
 	}
+	if cfg.Research.MaxResearchersPerTodo != 3 {
+		t.Fatalf("MaxResearchersPerTodo = %d, want 3", cfg.Research.MaxResearchersPerTodo)
+	}
+	if cfg.Research.MaxTodoResearchIterations != 2 {
+		t.Fatalf("MaxTodoResearchIterations = %d, want 2", cfg.Research.MaxTodoResearchIterations)
+	}
 	if cfg.Model.Timeout != 60*time.Second {
 		t.Fatalf("Timeout = %s, want 60s", cfg.Model.Timeout)
 	}
@@ -52,6 +58,8 @@ search:
   results_per_search: 3
 research:
   max_iterations: 7
+  max_researchers_per_todo: 4
+  max_todo_research_iterations: 3
 output:
   format: json
   verbose: true
@@ -93,6 +101,12 @@ output:
 	}
 	if cfg.Research.MaxIterations != 9 {
 		t.Fatalf("MaxIterations = %d, want 9", cfg.Research.MaxIterations)
+	}
+	if cfg.Research.MaxResearchersPerTodo != 4 {
+		t.Fatalf("MaxResearchersPerTodo = %d, want 4", cfg.Research.MaxResearchersPerTodo)
+	}
+	if cfg.Research.MaxTodoResearchIterations != 3 {
+		t.Fatalf("MaxTodoResearchIterations = %d, want 3", cfg.Research.MaxTodoResearchIterations)
 	}
 	if cfg.Output.Format != "markdown" {
 		t.Fatalf("Output.Format = %q, want markdown", cfg.Output.Format)
@@ -187,6 +201,29 @@ func TestValidateRejectsUnsupportedModelProvider(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("Validate returned nil, want unsupported model provider error")
+	}
+}
+
+func TestValidateRejectsNonPositiveTodoResearchSettings(t *testing.T) {
+	tests := map[string]func(*Config){
+		"max researchers per todo": func(cfg *Config) {
+			cfg.Research.MaxResearchersPerTodo = 0
+		},
+		"max todo research iterations": func(cfg *Config) {
+			cfg.Research.MaxTodoResearchIterations = 0
+		},
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := Defaults()
+			mutate(&cfg)
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate returned nil, want non-positive research setting error")
+			}
+		})
 	}
 }
 

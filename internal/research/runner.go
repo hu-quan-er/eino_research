@@ -15,18 +15,19 @@ import (
 )
 
 type RunnerConfig struct {
-	Model                 model.ToolCallingChatModel
-	SearchProvider        search.Provider
-	ModelName             string
-	SearchProviderName    string
-	MaxIterations         int
-	MaxSearchesPerStep    int
-	ResultsPerSearch      int
-	MaxParallelTodos      int
-	MaxResearchersPerTodo int
-	TodoExecutor          TodoExecutor
-	TodoReplanner         TodoReplanner
-	TodoDispatcher        TodoDispatcher
+	Model                     model.ToolCallingChatModel
+	SearchProvider            search.Provider
+	ModelName                 string
+	SearchProviderName        string
+	MaxIterations             int
+	MaxSearchesPerStep        int
+	ResultsPerSearch          int
+	MaxParallelTodos          int
+	MaxResearchersPerTodo     int
+	MaxTodoResearchIterations int
+	TodoExecutor              TodoExecutor
+	TodoReplanner             TodoReplanner
+	TodoDispatcher            TodoDispatcher
 }
 
 type Runner struct {
@@ -56,6 +57,9 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	}
 	if cfg.MaxResearchersPerTodo <= 0 {
 		cfg.MaxResearchersPerTodo = 3
+	}
+	if cfg.MaxTodoResearchIterations <= 0 {
+		cfg.MaxTodoResearchIterations = 2
 	}
 
 	return &Runner{cfg: cfg}, nil
@@ -367,10 +371,18 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	}
 
 	step := todoToResearchStep(in.Todo)
-	execution, err := NewParallelStepExecutor(researchers, NewAgentSynthesizer(r.cfg.Model)).ExecuteStep(ctx, StepExecutionInput{
-		Question:      in.Plan.Objective,
-		Step:          step,
-		ExecutedSteps: dependencyExecutionsAsSteps(in.DependencyExecutions),
+	stepExecutor := NewParallelStepExecutor(researchers, NewAgentSynthesizer(r.cfg.Model))
+	execution, err := runTodoResearchLoop(ctx, TodoResearchLoopInput{
+		Plan:                 in.Plan,
+		Todo:                 in.Todo,
+		DependencyExecutions: in.DependencyExecutions,
+		MaxIterations:        r.cfg.MaxTodoResearchIterations,
+		ExecuteStep: func(ctx context.Context, input StepExecutionInput) (StepExecution, error) {
+			if strings.TrimSpace(input.Step.ID) == "" {
+				input.Step = step
+			}
+			return stepExecutor.ExecuteStep(ctx, input)
+		},
 	})
 	if err != nil {
 		return TodoExecution{}, err

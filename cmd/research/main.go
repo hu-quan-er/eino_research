@@ -133,14 +133,16 @@ func run(args []string) int {
 	}
 
 	runner, err := research.NewRunner(research.RunnerConfig{
-		Model:              model,
-		SearchProvider:     sp,
-		ModelName:          cfg.Model.Model,
-		SearchProviderName: searchName,
-		MaxIterations:      cfg.Research.MaxIterations,
-		MaxSearchesPerStep: cfg.Search.MaxSearchesPerStep,
-		ResultsPerSearch:   cfg.Search.ResultsPerSearch,
-		MaxParallelTodos:   *maxParallel,
+		Model:                     model,
+		SearchProvider:            sp,
+		ModelName:                 cfg.Model.Model,
+		SearchProviderName:        searchName,
+		MaxIterations:             cfg.Research.MaxIterations,
+		MaxSearchesPerStep:        cfg.Search.MaxSearchesPerStep,
+		ResultsPerSearch:          cfg.Search.ResultsPerSearch,
+		MaxParallelTodos:          *maxParallel,
+		MaxResearchersPerTodo:     cfg.Research.MaxResearchersPerTodo,
+		MaxTodoResearchIterations: cfg.Research.MaxTodoResearchIterations,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "runner error: %v\n", err)
