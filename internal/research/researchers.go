@@ -20,7 +20,7 @@ type AgentResearcher struct {
 	agent adk.Agent
 }
 
-func NewAgentResearcher(ctx context.Context, role, focus string, m model.BaseChatModel, searchTool tool.BaseTool) (*AgentResearcher, error) {
+func NewAgentResearcher(ctx context.Context, role, focus string, m model.BaseChatModel, tools ...tool.BaseTool) (*AgentResearcher, error) {
 	if strings.TrimSpace(role) == "" {
 		return nil, fmt.Errorf("role is required")
 	}
@@ -30,8 +30,13 @@ func NewAgentResearcher(ctx context.Context, role, focus string, m model.BaseCha
 	if isNilDependency(m) {
 		return nil, fmt.Errorf("model is nil")
 	}
-	if isNilDependency(searchTool) {
-		return nil, fmt.Errorf("search tool is nil")
+	if len(tools) == 0 {
+		return nil, fmt.Errorf("at least one research tool is required")
+	}
+	for i, researchTool := range tools {
+		if isNilDependency(researchTool) {
+			return nil, fmt.Errorf("research tool %d is nil", i)
+		}
 	}
 
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
@@ -39,7 +44,7 @@ func NewAgentResearcher(ctx context.Context, role, focus string, m model.BaseCha
 		Description: fmt.Sprintf("Research agent focused on %s.", focus),
 		Instruction: fmt.Sprintf(`You are %s. Focus on %s.
 
-Use web search when it helps. Return only one JSON object matching:
+Use web_search to discover sources and web_fetch to read important source URLs when deeper evidence is needed. Return only one JSON object matching:
 {
   "role": string,
   "focus": string,
@@ -52,7 +57,7 @@ Do not wrap the JSON in markdown.`, role, focus),
 		Model: m,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: []tool.BaseTool{searchTool},
+				Tools: tools,
 			},
 		},
 		MaxIterations: 4,

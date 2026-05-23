@@ -2,6 +2,8 @@ package research
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -70,4 +72,75 @@ func TestWebSearchToolEnforcesLimit(t *testing.T) {
 	if !strings.Contains(err.Error(), "search limit exceeded") {
 		t.Fatalf("error = %q", err.Error())
 	}
+}
+
+func TestWebFetchToolFetchesHTMLContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html>
+			<head><title>Example Research Page</title><script>hidden()</script></head>
+			<body><main><h1>Visible Heading</h1><p>Useful evidence for the report.</p></main></body>
+		</html>`))
+	}))
+	defer server.Close()
+
+	tool, err := NewWebFetchTool(HTTPPageFetcher{Client: server.Client()}, FetchLimits{MaxFetchesPerStep: 1, MaxContentChars: 2000})
+	if err != nil {
+		t.Fatalf("NewWebFetchTool: %v", err)
+	}
+
+	out, err := tool.InvokableRun(context.Background(), `{"url":"`+server.URL+`"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	for _, want := range []string{"Example Research Page", "Visible Heading", "Useful evidence"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output = %s, want %q", out, want)
+		}
+	}
+	if strings.Contains(out, "hidden") {
+		t.Fatalf("output = %s, want script content removed", out)
+	}
+}
+
+func TestWebFetchToolEnforcesLimit(t *testing.T) {
+	fetcher := &recordingFetcher{}
+	tool, err := NewWebFetchTool(fetcher, FetchLimits{MaxFetchesPerStep: 1, MaxContentChars: 1000})
+	if err != nil {
+		t.Fatalf("NewWebFetchTool: %v", err)
+	}
+
+	if _, err := tool.InvokableRun(context.Background(), `{"url":"https://example.com/one"}`); err != nil {
+		t.Fatalf("first fetch returned error: %v", err)
+	}
+	_, err = tool.InvokableRun(context.Background(), `{"url":"https://example.com/two"}`)
+	if err == nil {
+		t.Fatal("second fetch returned nil error, want limit error")
+	}
+	if !strings.Contains(err.Error(), "fetch limit exceeded") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestHTTPPageFetcherRejectsNonHTTPURL(t *testing.T) {
+	_, err := HTTPPageFetcher{}.Fetch(context.Background(), "file:///etc/passwd", 1000)
+	if err == nil {
+		t.Fatal("Fetch returned nil error, want scheme error")
+	}
+	if !strings.Contains(err.Error(), "unsupported URL scheme") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+type recordingFetcher struct {
+	calls []string
+}
+
+func (f *recordingFetcher) Fetch(_ context.Context, url string, _ int) (FetchedPage, error) {
+	f.calls = append(f.calls, url)
+	return FetchedPage{
+		URL:   url,
+		Title: "Recorded",
+		Text:  "Recorded content",
+	}, nil
 }

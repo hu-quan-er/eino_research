@@ -267,8 +267,15 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	if err != nil {
 		return StepExecution{}, fmt.Errorf("new web search tool: %w", err)
 	}
+	fetchTool, err := NewWebFetchTool(HTTPPageFetcher{}, FetchLimits{
+		MaxFetchesPerStep: e.cfg.MaxSearchesPerStep,
+		MaxContentChars:   4000,
+	})
+	if err != nil {
+		return StepExecution{}, fmt.Errorf("new web fetch tool: %w", err)
+	}
 
-	researchers, err := buildResearchers(ctx, e.cfg, searchTool)
+	researchers, err := buildResearchers(ctx, e.cfg, searchTool, fetchTool)
 	if err != nil {
 		return StepExecution{}, err
 	}
@@ -293,11 +300,11 @@ func sourceIDPrefix(stepID string) string {
 	return stepID + "_src"
 }
 
-func buildResearchers(ctx context.Context, cfg RunnerConfig, searchTool tool.BaseTool) ([]Researcher, error) {
+func buildResearchers(ctx context.Context, cfg RunnerConfig, researchTools ...tool.BaseTool) ([]Researcher, error) {
 	roles := DefaultResearcherRoles()
 	researchers := make([]Researcher, 0, len(roles))
 	for i, role := range roles {
-		researcher, err := NewAgentResearcher(ctx, role, focusForIndex(i), cfg.Model, searchTool)
+		researcher, err := NewAgentResearcher(ctx, role, focusForIndex(i), cfg.Model, researchTools...)
 		if err != nil {
 			return nil, fmt.Errorf("new %s: %w", role, err)
 		}
