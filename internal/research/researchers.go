@@ -49,11 +49,11 @@ Use web_search to discover sources and web_fetch to read important source URLs w
   "role": string,
   "focus": string,
   "queries": [string],
-  "findings": [{"claim": string, "rationale": string, "source_ids": [string]}],
+  "findings": [{"claim": string, "rationale": string, "source_ids": [string], "evidence_refs": [{"source_id": string, "quote": string}]}],
   "sources": [{"id": string, "title": string, "url": string, "snippet": string, "provider": string, "query": string}],
   "errors": [string]
 }
-Do not wrap the JSON in markdown.`, role, focus),
+Use source_ids and evidence_refs for every source-backed claim. Do not wrap the JSON in markdown.`, role, focus),
 		Model: m,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
@@ -160,7 +160,7 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	}
 
 	resp, err := s.model.Generate(ctx, []*schema.Message{
-		schema.SystemMessage(`You synthesize parallel researcher outputs into one StepExecution. Return only valid JSON with fields step, researcher_results, summary, gaps, and sources.`),
+		schema.SystemMessage(`You synthesize parallel researcher outputs into one StepExecution. Return only valid JSON with fields step, researcher_results, summary, gaps, and sources. Preserve source_ids and evidence_refs for source-backed findings.`),
 		schema.UserMessage(string(b)),
 	})
 	if err != nil {
@@ -201,8 +201,12 @@ func collectResearcherSources(results []ResearcherResult) []search.Source {
 
 func normalizeStepExecutionSources(execution StepExecution) StepExecution {
 	results, researcherSources := normalizeResearcherSources(execution.ResearcherResults)
+	sources := mergeSources(researcherSources, execution.Sources)
+	documents := mergeSourceDocuments(buildSourceDocuments(sources, defaultSourceChunkChars), execution.Documents)
+	results = enrichResearcherEvidence(results, documents)
 	execution.ResearcherResults = results
-	execution.Sources = mergeSources(researcherSources, execution.Sources)
+	execution.Sources = sources
+	execution.Documents = documents
 	return execution
 }
 
@@ -279,7 +283,22 @@ func rewriteFindingsSourceIDs(findings []Finding, idMap map[string]string) []Fin
 			rewritten = append(rewritten, sourceID)
 		}
 		finding.SourceIDs = rewritten
+		finding.EvidenceRefs = rewriteEvidenceRefsSourceIDs(finding.EvidenceRefs, idMap)
 		out[i] = finding
+	}
+	return out
+}
+
+func rewriteEvidenceRefsSourceIDs(refs []EvidenceRef, idMap map[string]string) []EvidenceRef {
+	if len(refs) == 0 {
+		return refs
+	}
+	out := make([]EvidenceRef, len(refs))
+	for i, ref := range refs {
+		if mapped, ok := idMap[ref.SourceID]; ok {
+			ref.SourceID = mapped
+		}
+		out[i] = ref
 	}
 	return out
 }

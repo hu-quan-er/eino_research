@@ -21,6 +21,7 @@ type TodoExecution struct {
 	Findings          []Finding          `json:"findings,omitempty"`
 	Gaps              []string           `json:"gaps,omitempty"`
 	Sources           []search.Source    `json:"sources"`
+	Documents         []SourceDocument   `json:"documents,omitempty"`
 	Error             string             `json:"error,omitempty"`
 }
 

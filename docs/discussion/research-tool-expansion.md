@@ -37,6 +37,33 @@
 - PDF 和网页正文应统一为 source document 模型，方便后续 claim-level citations。
 - 长网页需要 chunking，否则单次工具返回仍可能丢失关键段落。
 
+## SourceDocument / SourceChunk / EvidenceRef
+
+问题：
+
+只保留 source URL 和 snippet 时，最终结论只能做到 source-level citation，无法说明 claim 具体依据的是哪段证据。Deep research 类产品通常需要 claim-level citation，也就是每个关键判断都能回到具体来源片段。
+
+当前选型：
+
+- 保留原有 `Finding.source_ids`，保证向后兼容。
+- 新增 `Finding.evidence_refs`，用于指向 source/chunk，并保存短 quote。
+- 新增 `SourceDocument` / `SourceChunk`，作为 sources 的结构化证据层。
+- 第一版先从现有 `search.Source` 的 `snippet/title` 自动构建 documents/chunks。
+- researcher 和 synthesizer prompt 已要求保留 `source_ids` 和 `evidence_refs`。
+
+当前行为：
+
+- `normalizeStepExecutionSources` 会统一 source id，生成 `documents`，并给 findings 自动补齐缺失的 `evidence_refs`。
+- `TodoExecution` 和 `ResearchResult` 都会保留 `documents`。
+- 如果模型只返回旧字段 `source_ids`，系统会从对应 source 的首个 chunk 自动生成 `EvidenceRef`。
+- 如果模型返回了 `evidence_refs` 但缺少 chunk id，系统会用对应 source 的首个 chunk 补齐。
+
+后续注意：
+
+- 当前 documents 主要来自搜索 snippet/title；后续应把 `web_fetch` 正文直接沉淀为更完整的 `SourceDocument`。
+- 长文档需要 chunk overlap、段落边界和 chunk relevance scoring。
+- 最终 report renderer 应优先使用 `evidence_refs`，而不是只列 source URLs。
+
 ## Todo 内多角色派发
 
 问题：

@@ -206,6 +206,7 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 	result.TodoExecutions = todoExecutions
 	result.SectionExecutions = groupTodoExecutionsBySection(plan, todoExecutions)
 	result.Sources = collectTodoExecutionSources(todoExecutions)
+	result.Documents = collectTodoExecutionDocuments(todoExecutions)
 	result.Answer.Summary = fmt.Sprintf("Completed %d todo(s).", countTodoStatus(todoExecutions, TodoDone))
 	result.Answer.Markdown = result.Answer.Summary
 
@@ -436,6 +437,14 @@ func collectTodoExecutionSources(executions []TodoExecution) []search.Source {
 	return search.DeduplicateStable(sources)
 }
 
+func collectTodoExecutionDocuments(executions []TodoExecution) []SourceDocument {
+	documents := make([]SourceDocument, 0)
+	for _, execution := range executions {
+		documents = append(documents, execution.Documents...)
+	}
+	return dedupeSourceDocuments(documents)
+}
+
 func countTodoStatus(executions []TodoExecution, status TodoStatus) int {
 	count := 0
 	for _, execution := range executions {
@@ -633,6 +642,7 @@ func applyRunnerContent(result *ResearchResult, content string) (string, bool) {
 		step = normalizeStepExecutionSources(step)
 		result.ExecutedSteps = append(result.ExecutedSteps, step)
 		result.Sources = search.DeduplicateStable(append(result.Sources, step.Sources...))
+		result.Documents = mergeSourceDocuments(result.Documents, step.Documents)
 		return "", false
 	}
 	if response, ok := parsePlanExecuteResponse(content); ok {

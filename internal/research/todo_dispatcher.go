@@ -186,6 +186,7 @@ func stepExecutionToTodoExecution(todo ResearchTodo, step StepExecution) TodoExe
 	for _, result := range step.ResearcherResults {
 		findings = append(findings, result.Findings...)
 	}
+	findings = enrichFindingsEvidence(findings, step.Documents)
 
 	summary := strings.TrimSpace(step.Summary)
 	if summary == "" {
@@ -200,6 +201,7 @@ func stepExecutionToTodoExecution(todo ResearchTodo, step StepExecution) TodoExe
 		Findings:          findings,
 		Gaps:              step.Gaps,
 		Sources:           step.Sources,
+		Documents:         step.Documents,
 	}
 }
 
