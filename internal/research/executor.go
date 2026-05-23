@@ -19,6 +19,11 @@ type Researcher interface {
 	Research(ctx context.Context, in ResearcherInput) (ResearcherResult, error)
 }
 
+type ResearcherMetadata interface {
+	ResearcherRole() string
+	ResearcherFocus() string
+}
+
 type Synthesizer interface {
 	Synthesize(ctx context.Context, in SynthesisInput) (StepExecution, error)
 }
@@ -73,7 +78,8 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 		wg.Add(1)
 		go func(idx int, r Researcher) {
 			defer wg.Done()
-			focus := focusForIndex(idx)
+			role := researcherRoleForIndex(idx, r)
+			focus := researcherFocusForIndex(idx, r)
 			result, err := r.Research(ctx, ResearcherInput{
 				Question:      in.Question,
 				Step:          in.Step,
@@ -83,7 +89,7 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 			if err != nil {
 				researcherErrors[idx] = err
 				results[idx] = ResearcherResult{
-					Role:   roleForIndex(idx),
+					Role:   role,
 					Focus:  focus,
 					Errors: []string{err.Error()},
 				}
@@ -128,6 +134,24 @@ func allResearchersFailedError(results []ResearcherResult, researcherErrors []er
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func researcherRoleForIndex(i int, researcher Researcher) string {
+	if metadata, ok := researcher.(ResearcherMetadata); ok {
+		if role := strings.TrimSpace(metadata.ResearcherRole()); role != "" {
+			return role
+		}
+	}
+	return roleForIndex(i)
+}
+
+func researcherFocusForIndex(i int, researcher Researcher) string {
+	if metadata, ok := researcher.(ResearcherMetadata); ok {
+		if focus := strings.TrimSpace(metadata.ResearcherFocus()); focus != "" {
+			return focus
+		}
+	}
+	return focusForIndex(i)
 }
 
 func isNilDependency(v any) bool {
@@ -307,6 +331,18 @@ func buildResearchers(ctx context.Context, cfg RunnerConfig, researchTools ...to
 		researcher, err := NewAgentResearcher(ctx, role, focusForIndex(i), cfg.Model, researchTools...)
 		if err != nil {
 			return nil, fmt.Errorf("new %s: %w", role, err)
+		}
+		researchers = append(researchers, researcher)
+	}
+	return researchers, nil
+}
+
+func buildTodoResearchers(ctx context.Context, cfg RunnerConfig, jobs []TodoResearchJob, researchTools ...tool.BaseTool) ([]Researcher, error) {
+	researchers := make([]Researcher, 0, len(jobs))
+	for _, job := range jobs {
+		researcher, err := NewAgentResearcher(ctx, job.RoleID, job.Focus, cfg.Model, researchTools...)
+		if err != nil {
+			return nil, fmt.Errorf("new %s: %w", job.RoleID, err)
 		}
 		researchers = append(researchers, researcher)
 	}

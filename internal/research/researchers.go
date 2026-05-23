@@ -69,6 +69,20 @@ Do not wrap the JSON in markdown.`, role, focus),
 	return &AgentResearcher{role: role, focus: focus, agent: agent}, nil
 }
 
+func (r *AgentResearcher) ResearcherRole() string {
+	if r == nil {
+		return ""
+	}
+	return r.role
+}
+
+func (r *AgentResearcher) ResearcherFocus() string {
+	if r == nil {
+		return ""
+	}
+	return r.focus
+}
+
 func (r *AgentResearcher) Research(ctx context.Context, in ResearcherInput) (ResearcherResult, error) {
 	if r == nil {
 		return ResearcherResult{}, fmt.Errorf("agent researcher is nil")

@@ -15,16 +15,18 @@ import (
 )
 
 type RunnerConfig struct {
-	Model              model.ToolCallingChatModel
-	SearchProvider     search.Provider
-	ModelName          string
-	SearchProviderName string
-	MaxIterations      int
-	MaxSearchesPerStep int
-	ResultsPerSearch   int
-	MaxParallelTodos   int
-	TodoExecutor       TodoExecutor
-	TodoReplanner      TodoReplanner
+	Model                 model.ToolCallingChatModel
+	SearchProvider        search.Provider
+	ModelName             string
+	SearchProviderName    string
+	MaxIterations         int
+	MaxSearchesPerStep    int
+	ResultsPerSearch      int
+	MaxParallelTodos      int
+	MaxResearchersPerTodo int
+	TodoExecutor          TodoExecutor
+	TodoReplanner         TodoReplanner
+	TodoDispatcher        TodoDispatcher
 }
 
 type Runner struct {
@@ -51,6 +53,9 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	}
 	if cfg.MaxParallelTodos <= 0 {
 		cfg.MaxParallelTodos = 1
+	}
+	if cfg.MaxResearchersPerTodo <= 0 {
+		cfg.MaxResearchersPerTodo = 3
 	}
 
 	return &Runner{cfg: cfg}, nil
@@ -311,7 +316,6 @@ func (r *Runner) buildAgent(ctx context.Context) (adk.ResumableAgent, error) {
 }
 
 func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExecution, error) {
-	sources := make([]search.Source, 0)
 	maxSearches := r.cfg.MaxSearchesPerStep
 	if maxSearches <= 0 {
 		maxSearches = 6
@@ -321,32 +325,58 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 		resultsPerSearch = 5
 	}
 
-	nextSource := 1
-	for i, query := range in.Todo.SearchQueries {
-		if i >= maxSearches {
-			break
-		}
-		query = strings.TrimSpace(query)
-		if query == "" {
-			continue
-		}
-		results, err := r.cfg.SearchProvider.Search(ctx, query, resultsPerSearch)
-		if err != nil {
-			return TodoExecution{}, err
-		}
-		for _, source := range results {
-			source.ID = fmt.Sprintf("%s_src_%d", in.Todo.ID, nextSource)
-			nextSource++
-			sources = append(sources, source)
-		}
+	dispatcher := r.cfg.TodoDispatcher
+	if dispatcher == nil {
+		dispatcher = RuleBasedTodoDispatcher{MaxResearchers: r.cfg.MaxResearchersPerTodo}
+	}
+	jobs, err := dispatcher.Dispatch(ctx, TodoDispatchInput{
+		Plan:                 in.Plan,
+		Todo:                 in.Todo,
+		DependencyExecutions: in.DependencyExecutions,
+		Budget: TodoResearchBudget{
+			MaxSearches: maxSearches,
+			MaxFetches:  maxSearches,
+		},
+	})
+	if err != nil {
+		return TodoExecution{}, err
+	}
+	if len(jobs) == 0 {
+		return TodoExecution{}, fmt.Errorf("todo dispatcher returned no jobs for todo %s", in.Todo.ID)
 	}
 
-	return TodoExecution{
-		Todo:    in.Todo,
-		Status:  TodoDone,
-		Summary: in.Todo.Title,
-		Sources: search.DeduplicateStable(sources),
-	}, nil
+	searchTool, err := NewWebSearchTool(r.cfg.SearchProvider, SearchLimits{
+		MaxSearchesPerStep: maxSearches,
+		ResultsPerSearch:   resultsPerSearch,
+		SourceIDPrefix:     sourceIDPrefix(in.Todo.ID),
+	})
+	if err != nil {
+		return TodoExecution{}, fmt.Errorf("new web search tool: %w", err)
+	}
+	fetchTool, err := NewWebFetchTool(HTTPPageFetcher{}, FetchLimits{
+		MaxFetchesPerStep: maxSearches,
+		MaxContentChars:   4000,
+	})
+	if err != nil {
+		return TodoExecution{}, fmt.Errorf("new web fetch tool: %w", err)
+	}
+
+	researchers, err := buildTodoResearchers(ctx, r.cfg, jobs, searchTool, fetchTool)
+	if err != nil {
+		return TodoExecution{}, err
+	}
+
+	step := todoToResearchStep(in.Todo)
+	execution, err := NewParallelStepExecutor(researchers, NewAgentSynthesizer(r.cfg.Model)).ExecuteStep(ctx, StepExecutionInput{
+		Question:      in.Plan.Objective,
+		Step:          step,
+		ExecutedSteps: dependencyExecutionsAsSteps(in.DependencyExecutions),
+	})
+	if err != nil {
+		return TodoExecution{}, err
+	}
+
+	return stepExecutionToTodoExecution(in.Todo, execution), nil
 }
 
 func groupTodoExecutionsBySection(plan ResearchTodoPlan, executions []TodoExecution) []SectionExecution {
