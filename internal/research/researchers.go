@@ -14,12 +14,20 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
+// AgentResearcher 是基于 Eino ChatModelAgent 的 researcher 实现。
+//
+// 每个实例绑定一个角色和 focus，执行时会通过 web_search/web_fetch 收集资料，并要求模型
+// 返回 ResearcherResult JSON。
 type AgentResearcher struct {
 	role  string
 	focus string
 	agent adk.Agent
 }
 
+// NewAgentResearcher 创建一个可使用研究工具的子代理。
+//
+// tools 至少需要包含 web_search；传入 web_fetch 后，模型可以读取搜索结果中的关键 URL
+// 并把正文片段写入 documents。
 func NewAgentResearcher(ctx context.Context, role, focus string, m model.BaseChatModel, tools ...tool.BaseTool) (*AgentResearcher, error) {
 	if strings.TrimSpace(role) == "" {
 		return nil, fmt.Errorf("role is required")
@@ -70,6 +78,7 @@ Use source_ids and evidence_refs for every source-backed claim. When web_fetch p
 	return &AgentResearcher{role: role, focus: focus, agent: agent}, nil
 }
 
+// ResearcherRole 返回该 researcher 的稳定角色 ID。
 func (r *AgentResearcher) ResearcherRole() string {
 	if r == nil {
 		return ""
@@ -77,6 +86,7 @@ func (r *AgentResearcher) ResearcherRole() string {
 	return r.role
 }
 
+// ResearcherFocus 返回该 researcher 的研究侧重点。
 func (r *AgentResearcher) ResearcherFocus() string {
 	if r == nil {
 		return ""
@@ -84,6 +94,10 @@ func (r *AgentResearcher) ResearcherFocus() string {
 	return r.focus
 }
 
+// Research 运行子代理并解析 ResearcherResult。
+//
+// 如果模型返回非 JSON 文本，这里不会直接失败，而是把文本包装成一个 finding；这样上层
+// synthesis 仍有机会利用该信息，同时 Errors 不会把整个 researcher 标记为系统失败。
 func (r *AgentResearcher) Research(ctx context.Context, in ResearcherInput) (ResearcherResult, error) {
 	if r == nil {
 		return ResearcherResult{}, fmt.Errorf("agent researcher is nil")
@@ -142,14 +156,20 @@ Return only a JSON ResearcherResult object.`, in.Question, stepPrompt, string(ex
 	return result, nil
 }
 
+// AgentSynthesizer 使用模型把多个 researcher 输出合并为 StepExecution。
 type AgentSynthesizer struct {
 	model model.BaseChatModel
 }
 
+// NewAgentSynthesizer 创建 synthesizer。
 func NewAgentSynthesizer(m model.BaseChatModel) *AgentSynthesizer {
 	return &AgentSynthesizer{model: m}
 }
 
+// Synthesize 综合多个 researcher 输出。
+//
+// 如果模型没有返回合法 JSON，会回退为一个最小 StepExecution，把 researcher 结果和 source
+// 原样保留下来，避免模型格式问题导致已收集证据全部丢失。
 func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (StepExecution, error) {
 	if s == nil || isNilDependency(s.model) {
 		return StepExecution{}, fmt.Errorf("synthesizer model is nil")
@@ -195,11 +215,16 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	return out, nil
 }
 
+// collectResearcherSources 从 researcher 结果中收集并归一化 sources。
 func collectResearcherSources(results []ResearcherResult) []search.Source {
 	_, sources := normalizeResearcherSources(results)
 	return sources
 }
 
+// normalizeStepExecutionSources 是 step 结果进入上层前的统一证据归一化入口。
+//
+// 它会合并 researcher sources、生成 documents、重写 finding source IDs，并为缺失的
+// evidence_refs 自动补齐 quote/chunk。
 func normalizeStepExecutionSources(execution StepExecution) StepExecution {
 	results, researcherSources := normalizeResearcherSources(execution.ResearcherResults)
 	sources := mergeSources(researcherSources, execution.Sources)
@@ -211,6 +236,10 @@ func normalizeStepExecutionSources(execution StepExecution) StepExecution {
 	return execution
 }
 
+// normalizeResearcherSources 合并多个 researcher 的 sources。
+//
+// 由于每个 researcher 都可能返回 src_1、src_2 这类局部 ID，这里会按 URL 去重并重写
+// findings/evidence_refs 中的 source_id，保证综合结果里的引用指向同一套全局 source ID。
 func normalizeResearcherSources(results []ResearcherResult) ([]ResearcherResult, []search.Source) {
 	normalized := make([]ResearcherResult, len(results))
 	urlToID := make(map[string]string)
@@ -249,6 +278,7 @@ func normalizeResearcherSources(results []ResearcherResult) ([]ResearcherResult,
 	return normalized, allSources
 }
 
+// allocateSourceID 尽量保留候选 ID；冲突或为空时分配新的 src_N。
 func allocateSourceID(candidate string, used map[string]struct{}, next *int) string {
 	candidate = strings.TrimSpace(candidate)
 	if candidate != "" {
@@ -265,6 +295,7 @@ func allocateSourceID(candidate string, used map[string]struct{}, next *int) str
 	}
 }
 
+// rewriteFindingsSourceIDs 使用 source ID 映射重写 finding 中的 source_ids 和 evidence_refs。
 func rewriteFindingsSourceIDs(findings []Finding, idMap map[string]string) []Finding {
 	if len(idMap) == 0 {
 		return findings
@@ -290,6 +321,7 @@ func rewriteFindingsSourceIDs(findings []Finding, idMap map[string]string) []Fin
 	return out
 }
 
+// rewriteEvidenceRefsSourceIDs 使用 source ID 映射重写 evidence_refs。
 func rewriteEvidenceRefsSourceIDs(refs []EvidenceRef, idMap map[string]string) []EvidenceRef {
 	if len(refs) == 0 {
 		return refs
@@ -304,6 +336,7 @@ func rewriteEvidenceRefsSourceIDs(refs []EvidenceRef, idMap map[string]string) [
 	return out
 }
 
+// mergeSources 合并 sources，primary 优先，fallback 用于补充 synthesizer 额外返回的来源。
 func mergeSources(primary, fallback []search.Source) []search.Source {
 	if len(primary) == 0 {
 		return fallback
@@ -314,6 +347,10 @@ func mergeSources(primary, fallback []search.Source) []search.Source {
 	return search.DeduplicateStable(append(primary, fallback...))
 }
 
+// collectLastAssistant 收集 agent 运行过程中最后一条非空 assistant 文本。
+//
+// ChatModelAgent 可能在工具调用之间产生多条 event；最终 JSON 通常出现在最后一条 assistant
+// message 中。
 func collectLastAssistant(iterator *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
 	if iterator == nil {
 		return "", fmt.Errorf("assistant iterator is nil")
@@ -357,6 +394,7 @@ func collectLastAssistant(iterator *adk.AsyncIterator[*adk.AgentEvent]) (string,
 	return last, nil
 }
 
+// FirstStepPrompt 将 ResearchStep 序列化为 researcher prompt 中的结构化 step 描述。
 func (s ResearchStep) FirstStepPrompt() string {
 	b, err := json.Marshal(s)
 	if err != nil {

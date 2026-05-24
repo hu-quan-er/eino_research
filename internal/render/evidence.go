@@ -9,6 +9,10 @@ import (
 
 const maxRenderedEvidenceQuoteChars = 360
 
+// appendFindingsAndEvidence 按 todo 输出 findings 和对应证据。
+//
+// 这里优先使用 Finding.EvidenceRefs 中的 quote；缺失时会从 result.Documents 中查找 source
+// 对应的 chunk 作为兜底。
 func appendFindingsAndEvidence(sb *strings.Builder, result research.ResearchResult) {
 	todos := renderedTodoExecutions(result)
 	if len(todos) == 0 {
@@ -42,6 +46,8 @@ func appendFindingsAndEvidence(sb *strings.Builder, result research.ResearchResu
 	}
 }
 
+// evidenceIndex 是 Markdown 渲染阶段使用的查找表，用于把 source_id/chunk_id 快速映射回
+// source 元数据和 chunk 文本。
 type evidenceIndex struct {
 	sourceByID         map[string]search.Source
 	documentBySourceID map[string]research.SourceDocument
@@ -49,6 +55,7 @@ type evidenceIndex struct {
 	firstChunkBySource map[string]research.SourceChunk
 }
 
+// buildEvidenceIndex 为一次渲染构建 evidence 查找表。
 func buildEvidenceIndex(result research.ResearchResult) evidenceIndex {
 	index := evidenceIndex{
 		sourceByID:         make(map[string]search.Source, len(result.Sources)),
@@ -83,6 +90,9 @@ func buildEvidenceIndex(result research.ResearchResult) evidenceIndex {
 	return index
 }
 
+// renderedTodoExecutions 选择用于渲染的 todo executions。
+//
+// 新流程优先使用 result.TodoExecutions；旧结果只有 SectionExecutions 时则从 section 中展开。
 func renderedTodoExecutions(result research.ResearchResult) []research.TodoExecution {
 	if len(result.TodoExecutions) > 0 {
 		return result.TodoExecutions
@@ -95,6 +105,7 @@ func renderedTodoExecutions(result research.ResearchResult) []research.TodoExecu
 	return todos
 }
 
+// todoFindings 获取 todo 已聚合的 findings；缺失时回退到 researcher results。
 func todoFindings(todo research.TodoExecution) []research.Finding {
 	if len(todo.Findings) > 0 {
 		return todo.Findings
@@ -107,6 +118,7 @@ func todoFindings(todo research.TodoExecution) []research.Finding {
 	return findings
 }
 
+// appendFinding 渲染单条 finding，包括 claim、rationale 和 evidence quote。
 func appendFinding(sb *strings.Builder, finding research.Finding, index evidenceIndex) {
 	claim := inlineText(finding.Claim)
 	if claim == "" {
@@ -136,6 +148,7 @@ func appendFinding(sb *strings.Builder, finding research.Finding, index evidence
 	}
 }
 
+// findingCitationIDs 合并 finding 的 source_ids 和 evidence_refs.source_id。
 func findingCitationIDs(finding research.Finding) []string {
 	ids := make([]string, 0, len(finding.SourceIDs)+len(finding.EvidenceRefs))
 	ids = append(ids, finding.SourceIDs...)
@@ -145,6 +158,8 @@ func findingCitationIDs(finding research.Finding) []string {
 	return dedupeInlineStrings(ids)
 }
 
+// evidenceRefsForFinding 返回 finding 可渲染的 evidence_refs，并在必要时从 document chunk
+// 自动补齐 quote。
 func evidenceRefsForFinding(finding research.Finding, index evidenceIndex) []research.EvidenceRef {
 	if len(finding.EvidenceRefs) == 0 {
 		refs := make([]research.EvidenceRef, 0, len(finding.SourceIDs))
@@ -189,6 +204,7 @@ func evidenceRefsForFinding(finding research.Finding, index evidenceIndex) []res
 	return dedupeEvidenceRefs(refs)
 }
 
+// renderEvidenceRef 将单个 evidence ref 渲染为短 quote 加 source/chunk 信息。
 func renderEvidenceRef(ref research.EvidenceRef, index evidenceIndex) string {
 	ref.SourceID = strings.TrimSpace(ref.SourceID)
 	ref.ChunkID = strings.TrimSpace(ref.ChunkID)
@@ -216,6 +232,7 @@ func renderEvidenceRef(ref research.EvidenceRef, index evidenceIndex) string {
 	return `"` + quote + `" (` + strings.Join(parts, ", ") + `)`
 }
 
+// sourceLabel 拼接 source id、标题和 URL，作为 evidence quote 后的可核对来源。
 func sourceLabel(sourceID string, index evidenceIndex) string {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
@@ -248,6 +265,7 @@ func sourceLabel(sourceID string, index evidenceIndex) string {
 	return label
 }
 
+// formatCitationIDs 渲染 finding claim 后面的简短 source id 列表。
 func formatCitationIDs(ids []string) string {
 	if len(ids) == 0 {
 		return ""
@@ -255,6 +273,7 @@ func formatCitationIDs(ids []string) string {
 	return "[" + strings.Join(ids, ", ") + "]"
 }
 
+// dedupeEvidenceRefs 按 source_id + chunk_id 去重。
 func dedupeEvidenceRefs(refs []research.EvidenceRef) []research.EvidenceRef {
 	seen := make(map[string]struct{}, len(refs))
 	out := make([]research.EvidenceRef, 0, len(refs))
@@ -274,6 +293,7 @@ func dedupeEvidenceRefs(refs []research.EvidenceRef) []research.EvidenceRef {
 	return out
 }
 
+// dedupeInlineStrings 清理并去重行内字符串。
 func dedupeInlineStrings(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
@@ -291,10 +311,12 @@ func dedupeInlineStrings(values []string) []string {
 	return out
 }
 
+// inlineText 把多行文本压成单行，避免破坏 Markdown 列表结构。
 func inlineText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
+// truncateInline 按 rune 截断行内文本。
 func truncateInline(value string, limit int) string {
 	if limit <= 0 {
 		return value

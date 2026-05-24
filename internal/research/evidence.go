@@ -12,6 +12,10 @@ const (
 	defaultEvidenceQuoteChars = 240
 )
 
+// buildSourceDocuments 从搜索结果构造最小 SourceDocument。
+//
+// 当还没有 web_fetch 正文时，snippet/title 是可用的兜底证据来源；后续如果抓取到完整页面，
+// buildFetchedPageDocuments 会提供更高质量的 document。
 func buildSourceDocuments(sources []search.Source, maxChunkChars int) []SourceDocument {
 	if maxChunkChars <= 0 {
 		maxChunkChars = defaultSourceChunkChars
@@ -42,6 +46,10 @@ func buildSourceDocuments(sources []search.Source, maxChunkChars int) []SourceDo
 	return documents
 }
 
+// buildFetchedPageDocuments 将 web_fetch 成功读取的页面转换为 SourceDocument。
+//
+// 如果页面 URL 能匹配已有 Source，会复用该 SourceID；否则分配 fetched_N，保证孤立抓取结果
+// 也能进入 documents。
 func buildFetchedPageDocuments(pages []FetchedPage, sources []search.Source, maxChunkChars int) []SourceDocument {
 	if maxChunkChars <= 0 {
 		maxChunkChars = defaultSourceChunkChars
@@ -92,6 +100,7 @@ func buildFetchedPageDocuments(pages []FetchedPage, sources []search.Source, max
 	return documents
 }
 
+// sourceDocumentText 选择搜索结果中可用于构造 document 的文本，优先 snippet，其次 title。
 func sourceDocumentText(source search.Source) string {
 	text := strings.TrimSpace(source.Snippet)
 	if text != "" {
@@ -104,6 +113,9 @@ func sourceDocumentText(source search.Source) string {
 	return ""
 }
 
+// chunkSourceText 按 rune 数把正文切成可引用的 SourceChunk。
+//
+// 当前实现是简单定长切分；后续可升级为按段落边界和 overlap 切分。
 func chunkSourceText(sourceID, documentID, text string, maxChunkChars int) []SourceChunk {
 	runes := []rune(strings.TrimSpace(text))
 	if len(runes) == 0 {
@@ -128,6 +140,8 @@ func chunkSourceText(sourceID, documentID, text string, maxChunkChars int) []Sou
 	return chunks
 }
 
+// enrichResearcherEvidence 为 researcher findings 补齐 evidence_refs，并合并 researcher 局部
+// documents。
 func enrichResearcherEvidence(results []ResearcherResult, documents []SourceDocument) []ResearcherResult {
 	if len(results) == 0 {
 		return results
@@ -142,6 +156,9 @@ func enrichResearcherEvidence(results []ResearcherResult, documents []SourceDocu
 	return out
 }
 
+// enrichFindingsEvidence 确保 finding 同时具备 source_ids 和 evidence_refs。
+//
+// 这样即便模型只返回旧字段 source_ids，最终报告仍然可以展示 chunk quote。
 func enrichFindingsEvidence(findings []Finding, documents []SourceDocument) []Finding {
 	if len(findings) == 0 {
 		return findings
@@ -161,6 +178,7 @@ func enrichFindingsEvidence(findings []Finding, documents []SourceDocument) []Fi
 	return out
 }
 
+// firstChunkBySourceID 为每个 source 取第一个 chunk，作为缺失 evidence_ref 时的兜底证据。
 func firstChunkBySourceID(documents []SourceDocument) map[string]SourceChunk {
 	out := make(map[string]SourceChunk, len(documents))
 	for _, document := range documents {
@@ -178,6 +196,7 @@ func firstChunkBySourceID(documents []SourceDocument) map[string]SourceChunk {
 	return out
 }
 
+// sourceIDsFromEvidenceRefs 从 evidence_refs 反推 source_ids，用于保持新旧 citation 字段一致。
 func sourceIDsFromEvidenceRefs(refs []EvidenceRef) []string {
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
@@ -188,6 +207,7 @@ func sourceIDsFromEvidenceRefs(refs []EvidenceRef) []string {
 	return out
 }
 
+// evidenceRefsFromSourceIDs 根据 source_ids 自动生成 evidence_refs。
 func evidenceRefsFromSourceIDs(sourceIDs []string, chunks map[string]SourceChunk) []EvidenceRef {
 	refs := make([]EvidenceRef, 0, len(sourceIDs))
 	seen := make(map[string]struct{}, len(sourceIDs))
@@ -210,6 +230,7 @@ func evidenceRefsFromSourceIDs(sourceIDs []string, chunks map[string]SourceChunk
 	return refs
 }
 
+// normalizeEvidenceRefs 清洗模型返回的 evidence_refs，并在缺少 chunk/quote 时尝试补齐。
 func normalizeEvidenceRefs(refs []EvidenceRef, chunks map[string]SourceChunk) []EvidenceRef {
 	out := make([]EvidenceRef, 0, len(refs))
 	seen := make(map[string]struct{}, len(refs))
@@ -238,6 +259,9 @@ func normalizeEvidenceRefs(refs []EvidenceRef, chunks map[string]SourceChunk) []
 	return out
 }
 
+// mergeSourceDocuments 合并 documents，primary 优先。
+//
+// 执行层会把 fetched page documents 放在 primary，使完整正文优先于搜索 snippet。
 func mergeSourceDocuments(primary, fallback []SourceDocument) []SourceDocument {
 	if len(primary) == 0 {
 		return dedupeSourceDocuments(fallback)
@@ -248,6 +272,7 @@ func mergeSourceDocuments(primary, fallback []SourceDocument) []SourceDocument {
 	return dedupeSourceDocuments(append(primary, fallback...))
 }
 
+// dedupeSourceDocuments 按 SourceID 去重；没有 SourceID 时按 URL 去重。
 func dedupeSourceDocuments(documents []SourceDocument) []SourceDocument {
 	seen := make(map[string]struct{}, len(documents))
 	out := make([]SourceDocument, 0, len(documents))

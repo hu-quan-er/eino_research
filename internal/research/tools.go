@@ -16,12 +16,14 @@ import (
 	"golang.org/x/net/html"
 )
 
+// SearchLimits 控制单个 step/todo 内 web_search 工具的预算和 source ID 前缀。
 type SearchLimits struct {
 	MaxSearchesPerStep int
 	ResultsPerSearch   int
 	SourceIDPrefix     string
 }
 
+// FetchLimits 控制单个 step/todo 内 web_fetch 工具的预算、正文长度和抓取结果记录器。
 type FetchLimits struct {
 	MaxFetchesPerStep int
 	MaxContentChars   int
@@ -29,16 +31,19 @@ type FetchLimits struct {
 	Recorder          FetchedPageRecorder
 }
 
+// WebSearchInput 是暴露给模型的 web_search 工具入参。
 type WebSearchInput struct {
 	Query string `json:"query" jsonschema:"description=Search query to run"`
 	Limit int    `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return"`
 }
 
+// WebFetchInput 是暴露给模型的 web_fetch 工具入参。
 type WebFetchInput struct {
 	URL      string `json:"url" jsonschema:"description=HTTP or HTTPS URL to fetch and read"`
 	MaxChars int    `json:"max_chars,omitempty" jsonschema:"description=Maximum number of extracted text characters to return"`
 }
 
+// FetchedPage 是 web_fetch 抓取并抽取可读文本后的结果。
 type FetchedPage struct {
 	URL         string `json:"url"`
 	Title       string `json:"title,omitempty"`
@@ -46,23 +51,30 @@ type FetchedPage struct {
 	ContentType string `json:"content_type,omitempty"`
 }
 
+// PageFetcher 抽象实际页面抓取逻辑，便于测试中替换 HTTP 实现。
 type PageFetcher interface {
 	Fetch(ctx context.Context, url string, maxChars int) (FetchedPage, error)
 }
 
+// FetchedPageRecorder 记录 web_fetch 成功读取的页面，执行结束后会转换为 SourceDocument。
 type FetchedPageRecorder interface {
 	RecordFetchedPage(page FetchedPage)
 }
 
+// FetchedPageStore 是线程安全的页面记录器。
+//
+// 多个 researcher 可能并行调用 web_fetch，因此这里用 mutex 保护内部 slice。
 type FetchedPageStore struct {
 	mu    sync.Mutex
 	pages []FetchedPage
 }
 
+// NewFetchedPageStore 创建页面抓取记录器。
 func NewFetchedPageStore() *FetchedPageStore {
 	return &FetchedPageStore{}
 }
 
+// RecordFetchedPage 保存非空 URL 且非空正文的页面。
 func (s *FetchedPageStore) RecordFetchedPage(page FetchedPage) {
 	if s == nil {
 		return
@@ -76,6 +88,7 @@ func (s *FetchedPageStore) RecordFetchedPage(page FetchedPage) {
 	s.pages = append(s.pages, page)
 }
 
+// Pages 返回已记录页面的副本，避免调用方修改内部状态。
 func (s *FetchedPageStore) Pages() []FetchedPage {
 	if s == nil {
 		return nil
@@ -88,11 +101,16 @@ func (s *FetchedPageStore) Pages() []FetchedPage {
 	return out
 }
 
+// HTTPPageFetcher 使用 net/http 抓取页面，并抽取 HTML 可见文本。
 type HTTPPageFetcher struct {
 	Client       *http.Client
 	MaxBodyBytes int64
 }
 
+// NewWebSearchTool 创建模型可调用的 web_search 工具。
+//
+// 工具内部使用 atomic 计数限制调用次数；返回的 Source ID 会按 SourceIDPrefix 重写，
+// 避免不同 step/todo 的 source ID 冲突。
 func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.InvokableTool, error) {
 	var count atomic.Int64
 	var sourceCount atomic.Int64
@@ -127,6 +145,9 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 	})
 }
 
+// NewWebFetchTool 创建模型可调用的 web_fetch 工具。
+//
+// fetch 成功后会写入 Recorder，供执行层在 step 结束时生成更完整的 SourceDocument。
 func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits) (tool.InvokableTool, error) {
 	if isNilDependency(fetcher) {
 		fetcher = HTTPPageFetcher{MaxBodyBytes: limits.MaxBodyBytes}
@@ -160,6 +181,9 @@ func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits) (tool.InvokableToo
 	})
 }
 
+// Fetch 抓取 HTTP/HTTPS 页面并返回截断后的可读文本。
+//
+// 非 HTML 响应会按纯文本处理；HTML 响应会过滤 script/style/noscript/svg 等不可读节点。
 func (f HTTPPageFetcher) Fetch(ctx context.Context, rawURL string, maxChars int) (FetchedPage, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	parsed, err := url.Parse(rawURL)
@@ -209,6 +233,7 @@ func (f HTTPPageFetcher) Fetch(ctx context.Context, rawURL string, maxChars int)
 	}, nil
 }
 
+// extractReadableText 从响应正文中抽取标题和正文文本。
 func extractReadableText(contentType, body string) (string, string) {
 	if !strings.Contains(strings.ToLower(contentType), "html") {
 		return "", normalizeWhitespace(body)
@@ -251,10 +276,12 @@ func extractReadableText(contentType, body string) (string, string) {
 	return normalizeWhitespace(strings.Join(titleParts, " ")), normalizeWhitespace(strings.Join(textParts, " "))
 }
 
+// normalizeWhitespace 把多种空白压缩为单个空格，便于 chunk 和 quote 稳定比较。
 func normalizeWhitespace(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
+// truncateText 按 rune 截断文本，避免中文等多字节字符被截坏。
 func truncateText(value string, maxChars int) string {
 	value = strings.TrimSpace(value)
 	if maxChars <= 0 {

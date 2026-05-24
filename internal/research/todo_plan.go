@@ -5,18 +5,27 @@ import (
 	"strings"
 )
 
+// ResearchTodoPlan 是当前主流程使用的 plan schema。
+//
+// Planner 只负责生成 sections、todos 和依赖关系；todo 内部要派发哪些 researcher 由
+// TodoDispatcher 在代码层决定，这样可以降低 planner 输出格式复杂度。
 type ResearchTodoPlan struct {
 	Objective string            `json:"objective"`
 	Sections  []ResearchSection `json:"sections"`
 	Todos     []ResearchTodo    `json:"todos"`
 }
 
+// ResearchSection 用于把 todo 组织成报告和执行摘要中的逻辑章节。
 type ResearchSection struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 }
 
+// ResearchTodo 是调度器真正执行的最小工作单元。
+//
+// DependsOn 只允许引用同一个 plan 中的 todo id；SearchQueries 是给 researcher 的初始
+// 检索提示，不代表 researcher 只能使用这些 query。
 type ResearchTodo struct {
 	ID                 string   `json:"id"`
 	SectionID          string   `json:"section_id"`
@@ -27,6 +36,10 @@ type ResearchTodo struct {
 	DependsOn          []string `json:"depends_on,omitempty"`
 }
 
+// ResearchTodoPlanPatch 是失败后 replanner 可以返回的最小补丁格式。
+//
+// 目前补丁只允许新增 todo、跳过未完成 todo、或调整未完成 todo 的依赖，避免 replanner
+// 修改已完成工作的历史结果。
 type ResearchTodoPlanPatch struct {
 	AddTodos    []ResearchTodo  `json:"add_todos,omitempty"`
 	SkipTodos   []string        `json:"skip_todos,omitempty"`
@@ -34,11 +47,16 @@ type ResearchTodoPlanPatch struct {
 	Explanation string          `json:"explanation,omitempty"`
 }
 
+// TodoDepsPatch 表示对单个 todo 依赖列表的替换。
 type TodoDepsPatch struct {
 	TodoID    string   `json:"todo_id"`
 	DependsOn []string `json:"depends_on"`
 }
 
+// Validate 校验 planner 输出的结构性正确性，包括必填字段、引用关系和依赖环。
+//
+// 语义质量检查不放在这里，而是由 todo_plan_linter.go 负责，这样结构错误和质量错误
+// 可以分别定位。
 func (p ResearchTodoPlan) Validate() error {
 	if strings.TrimSpace(p.Objective) == "" {
 		return fmt.Errorf("research todo plan objective is required")
@@ -112,6 +130,7 @@ func (p ResearchTodoPlan) Validate() error {
 	return nil
 }
 
+// validateTodoPlanAcyclic 使用 DFS 检查 todo 依赖图是否存在环。
 func validateTodoPlanAcyclic(deps map[string][]string) error {
 	const (
 		visiting = 1
@@ -146,6 +165,10 @@ func validateTodoPlanAcyclic(deps map[string][]string) error {
 	return nil
 }
 
+// applyResearchTodoPlanPatch 将 replanner 的补丁应用到当前 plan。
+//
+// 已完成 todo 被视为执行历史，不能被跳过或改依赖；补丁应用后会重新运行完整 plan
+// 校验，避免 replanner 引入悬空依赖或依赖环。
 func applyResearchTodoPlanPatch(plan ResearchTodoPlan, patch ResearchTodoPlanPatch, completed map[string]TodoExecution) (ResearchTodoPlan, error) {
 	completedIDs := make(map[string]struct{}, len(completed))
 	for todoID := range completed {

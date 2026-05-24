@@ -10,6 +10,9 @@ const (
 	PlanIssueWarning = "warning"
 )
 
+// PlanIssue 描述 planner 输出中的一个质量问题。
+//
+// Severity 当前主要使用 error；保留 warning 是为了后续允许非阻断式质量提示。
 type PlanIssue struct {
 	Severity string
 	Code     string
@@ -18,6 +21,7 @@ type PlanIssue struct {
 	Hint     string
 }
 
+// PlanLintError 把多个 PlanIssue 聚合成 error，供 planner repair prompt 使用。
 type PlanLintError struct {
 	Issues []PlanIssue
 }
@@ -40,6 +44,10 @@ func (e PlanLintError) Error() string {
 	return "plan lint failed: " + strings.Join(parts, "; ")
 }
 
+// LintResearchTodoPlan 对结构合法的 ResearchTodoPlan 做质量检查。
+//
+// 这些规则面向“能否执行出有效 research”，例如重复问题、过泛 acceptance criteria、缺少
+// search_queries 等；它们不替代 Validate 的结构校验。
 func LintResearchTodoPlan(plan ResearchTodoPlan) []PlanIssue {
 	issues := make([]PlanIssue, 0)
 	issues = append(issues, lintSectionCoverage(plan)...)
@@ -50,6 +58,7 @@ func LintResearchTodoPlan(plan ResearchTodoPlan) []PlanIssue {
 	return issues
 }
 
+// HasPlanLintErrors 判断 lint 结果中是否存在阻断执行的 error。
 func HasPlanLintErrors(issues []PlanIssue) bool {
 	for _, issue := range issues {
 		if issue.Severity == PlanIssueError {
@@ -59,6 +68,7 @@ func HasPlanLintErrors(issues []PlanIssue) bool {
 	return false
 }
 
+// validateResearchTodoPlanQuality 将 lint error 转为 planner 可感知的 error。
 func validateResearchTodoPlanQuality(plan ResearchTodoPlan) error {
 	issues := LintResearchTodoPlan(plan)
 	if !HasPlanLintErrors(issues) {
@@ -73,6 +83,7 @@ func validateResearchTodoPlanQuality(plan ResearchTodoPlan) error {
 	return PlanLintError{Issues: errorsOnly}
 }
 
+// lintSectionCoverage 要求每个 section 至少包含一个 todo。
 func lintSectionCoverage(plan ResearchTodoPlan) []PlanIssue {
 	countBySection := make(map[string]int, len(plan.Sections))
 	for _, todo := range plan.Todos {
@@ -96,6 +107,7 @@ func lintSectionCoverage(plan ResearchTodoPlan) []PlanIssue {
 	return issues
 }
 
+// lintTodoQuestions 检查 todo question 是否重复或过于泛化。
 func lintTodoQuestions(plan ResearchTodoPlan) []PlanIssue {
 	issues := make([]PlanIssue, 0)
 	seen := make(map[string]int, len(plan.Todos))
@@ -129,6 +141,7 @@ func lintTodoQuestions(plan ResearchTodoPlan) []PlanIssue {
 	return issues
 }
 
+// lintAcceptanceCriteria 检查 acceptance criteria 是否具体到可以验收。
 func lintAcceptanceCriteria(plan ResearchTodoPlan) []PlanIssue {
 	issues := make([]PlanIssue, 0)
 	for i, todo := range plan.Todos {
@@ -148,6 +161,7 @@ func lintAcceptanceCriteria(plan ResearchTodoPlan) []PlanIssue {
 	return issues
 }
 
+// lintSearchQueries 检查证据型 todo 是否提供可执行的初始搜索 query。
 func lintSearchQueries(plan ResearchTodoPlan) []PlanIssue {
 	issues := make([]PlanIssue, 0)
 	seenQueries := map[string]string{}
@@ -194,6 +208,7 @@ func lintSearchQueries(plan ResearchTodoPlan) []PlanIssue {
 	return issues
 }
 
+// lintSynthesisDependencies 要求 synthesis/final todo 依赖前置证据 todo。
 func lintSynthesisDependencies(plan ResearchTodoPlan) []PlanIssue {
 	issues := make([]PlanIssue, 0)
 	if len(plan.Todos) <= 1 {
@@ -215,6 +230,7 @@ func lintSynthesisDependencies(plan ResearchTodoPlan) []PlanIssue {
 	return issues
 }
 
+// requiresSearchQueries 用 section/todo 关键词判断某个 todo 是否必须提供搜索 query。
 func requiresSearchQueries(plan ResearchTodoPlan, todo ResearchTodo) bool {
 	if isSynthesisTodo(todo) {
 		return false
@@ -250,6 +266,7 @@ func requiresSearchQueries(plan ResearchTodoPlan, todo ResearchTodo) bool {
 	return false
 }
 
+// isSynthesisTodo 用关键词识别汇总/结论型 todo。
 func isSynthesisTodo(todo ResearchTodo) bool {
 	text := normalizeLintText(todo.Title + " " + todo.Question)
 	for _, keyword := range []string{"conclusion", "final", "recommendation", "recommend", "summarize", "synthesis", "synthesize"} {
@@ -260,6 +277,7 @@ func isSynthesisTodo(todo ResearchTodo) bool {
 	return false
 }
 
+// findTodoSection 按 section id 查找 section；找不到时返回空结构。
 func findTodoSection(plan ResearchTodoPlan, sectionID string) ResearchSection {
 	for _, section := range plan.Sections {
 		if strings.TrimSpace(section.ID) == strings.TrimSpace(sectionID) {
@@ -269,6 +287,7 @@ func findTodoSection(plan ResearchTodoPlan, sectionID string) ResearchSection {
 	return ResearchSection{}
 }
 
+// countNonEmptyStrings 统计非空字符串数量。
 func countNonEmptyStrings(values []string) int {
 	count := 0
 	for _, value := range values {
@@ -279,15 +298,18 @@ func countNonEmptyStrings(values []string) int {
 	return count
 }
 
+// normalizeLintText 统一大小写和空白，降低 lint 比较时的格式噪音。
 func normalizeLintText(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }
 
+// isGenericText 判断文本是否命中过泛模板。
 func isGenericText(value string, generic map[string]struct{}) bool {
 	_, ok := generic[value]
 	return ok
 }
 
+// genericTodoQuestions 返回常见但不可执行的 todo question 模板。
 func genericTodoQuestions() map[string]struct{} {
 	return map[string]struct{}{
 		"analyze the topic":      {},
@@ -301,6 +323,7 @@ func genericTodoQuestions() map[string]struct{} {
 	}
 }
 
+// genericAcceptanceCriteria 返回常见但无法验收的 acceptance criteria 模板。
 func genericAcceptanceCriteria() map[string]struct{} {
 	return map[string]struct{}{
 		"answer the question": {},

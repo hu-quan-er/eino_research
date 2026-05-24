@@ -6,24 +6,30 @@ import (
 	"strings"
 )
 
+// TodoResearchRole 描述一个 todo 内部派生出的研究角色。
 type TodoResearchRole struct {
 	ID    string
 	Name  string
 	Focus string
 }
 
+// TodoResearchBudget 是派发给单个 todo 的工具和 token 预算。
+//
+// 当前主要使用 MaxSearches/MaxFetches，MaxTokens 预留给后续模型调用预算控制。
 type TodoResearchBudget struct {
 	MaxSearches int
 	MaxFetches  int
 	MaxTokens   int
 }
 
+// TodoResearchContext 是 researcher job 需要理解当前 todo 的上下文。
 type TodoResearchContext struct {
 	Objective            string
 	Todo                 ResearchTodo
 	DependencyExecutions []TodoExecution
 }
 
+// TodoResearchJob 是 TodoDispatcher 的输出，也是 buildTodoResearchers 的输入。
 type TodoResearchJob struct {
 	TodoID  string
 	RoleID  string
@@ -33,6 +39,7 @@ type TodoResearchJob struct {
 	Budget  TodoResearchBudget
 }
 
+// TodoDispatchInput 是派发层决策 researcher jobs 的输入。
 type TodoDispatchInput struct {
 	Plan                 ResearchTodoPlan
 	Todo                 ResearchTodo
@@ -40,14 +47,19 @@ type TodoDispatchInput struct {
 	Budget               TodoResearchBudget
 }
 
+// TodoDispatcher 把一个 runnable todo 转换为一组角色化 researcher jobs。
 type TodoDispatcher interface {
 	Dispatch(ctx context.Context, in TodoDispatchInput) ([]TodoResearchJob, error)
 }
 
+// RuleBasedTodoDispatcher 使用确定性规则派发 researcher。
+//
+// 这样 planner 只需关注 todo 拆解，角色 fan-out 由代码控制，便于测试、限流和兜底。
 type RuleBasedTodoDispatcher struct {
 	MaxResearchers int
 }
 
+// Dispatch 根据 todo 类型和关键词派生 researcher jobs，并应用 MaxResearchers 上限。
 func (d RuleBasedTodoDispatcher) Dispatch(ctx context.Context, in TodoDispatchInput) ([]TodoResearchJob, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -83,6 +95,10 @@ func (d RuleBasedTodoDispatcher) Dispatch(ctx context.Context, in TodoDispatchIn
 	return jobs, nil
 }
 
+// DeriveTodoResearchRoles 根据 todo 内容确定需要哪些研究视角。
+//
+// synthesis todo 会走综合/查漏角色；普通 todo 至少包含 background/evidence/counterpoint，
+// 时效性 todo 会额外加入 freshness 角色。
 func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoResearchRole {
 	if isSynthesisTodo(todo) {
 		return []TodoResearchRole{
@@ -126,6 +142,9 @@ func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoRes
 	return roles
 }
 
+// todoNeedsFreshness 用关键词判断 todo 是否需要 freshness_researcher。
+//
+// 这是确定性启发式，后续如果引入模型 judge/dispatcher，也应保留该规则作为 fallback。
 func todoNeedsFreshness(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	text := normalizeLintText(strings.Join([]string{
 		plan.Objective,
@@ -152,6 +171,7 @@ func todoNeedsFreshness(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	return false
 }
 
+// todoToResearchStep 把当前主流程的 ResearchTodo 转换为可复用执行器需要的 ResearchStep。
 func todoToResearchStep(todo ResearchTodo) ResearchStep {
 	title := strings.TrimSpace(todo.Title)
 	if title == "" {
@@ -166,6 +186,8 @@ func todoToResearchStep(todo ResearchTodo) ResearchStep {
 	}
 }
 
+// dependencyExecutionsAsSteps 将已完成依赖转换为 prior executed steps，供当前 todo researcher
+// 读取上下文。
 func dependencyExecutionsAsSteps(executions []TodoExecution) []StepExecution {
 	steps := make([]StepExecution, 0, len(executions))
 	for _, execution := range executions {
@@ -180,6 +202,9 @@ func dependencyExecutionsAsSteps(executions []TodoExecution) []StepExecution {
 	return steps
 }
 
+// stepExecutionToTodoExecution 把并行 researcher + synthesis 的结果转换回 todo 结果。
+//
+// 转换时会再次运行 evidence 归一化，确保最终 TodoExecution.Findings 已带可渲染的证据引用。
 func stepExecutionToTodoExecution(todo ResearchTodo, step StepExecution) TodoExecution {
 	step = normalizeStepExecutionSources(step)
 	findings := make([]Finding, 0)
@@ -205,6 +230,7 @@ func stepExecutionToTodoExecution(todo ResearchTodo, step StepExecution) TodoExe
 	}
 }
 
+// nonEmptyStrings 清理字符串数组，保留非空项且保持原顺序。
 func nonEmptyStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {

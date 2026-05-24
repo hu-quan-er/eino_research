@@ -6,12 +6,18 @@ import (
 	"strconv"
 )
 
+// MockProvider 是测试和本地 dry-run 使用的确定性 Provider。
+//
+// 它让 planner/executor/render 等主流程在没有真实网络凭据时也能跑通。
 type MockProvider struct{}
 
+// NewMockProvider 创建一个确定性的 mock 搜索 provider。
 func NewMockProvider() *MockProvider {
 	return &MockProvider{}
 }
 
+// Search 返回稳定的 example.com 结果，同时遵守 context cancellation，方便测试调度器和
+// runner 的取消路径。
 func (p *MockProvider) Search(ctx context.Context, query string, limit int) ([]Source, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

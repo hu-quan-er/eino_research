@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// Source 是搜索 provider 传入 research 流程的标准引用单元。
+//
+// ID 通常只在当前结果集内有效，后续 researcher 结果归一化时可能会重写 ID，以保证不同
+// researcher 返回的 citation 可以稳定合并。
 type Source struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
@@ -15,10 +19,16 @@ type Source struct {
 	Query    string `json:"query"`
 }
 
+// Provider 是 research 引擎对搜索能力的最小抽象。
+//
+// 实现方应该遵守 context cancellation，并且返回数量不超过 limit 的 Source。
 type Provider interface {
 	Search(ctx context.Context, query string, limit int) ([]Source, error)
 }
 
+// Deduplicate 按 URL 去重，并重新分配连续的 src_N ID。
+//
+// 适用于 provider 没有稳定 ID，或调用方希望丢弃原始 ID 的场景。
 func Deduplicate(in []Source) []Source {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]Source, 0, len(in))
@@ -39,6 +49,10 @@ func Deduplicate(in []Source) []Source {
 	return out
 }
 
+// DeduplicateStable 按 URL 去重，同时保留不冲突的原始 source ID。
+//
+// 多个 todo execution 汇总 sources 时依赖这个函数，避免已经写入 findings/evidence_refs
+// 的 source_id 被无意义重排。
 func DeduplicateStable(in []Source) []Source {
 	seenURL := make(map[string]struct{}, len(in))
 	usedID := make(map[string]struct{}, len(in))

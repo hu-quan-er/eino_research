@@ -14,6 +14,9 @@ const (
 	maxGoogleSearchLimit = 10
 )
 
+// GoogleConfig 配置 Google Custom Search provider。
+//
+// BaseURL 和 Client 可注入，方便测试时把请求导向 httptest server。
 type GoogleConfig struct {
 	APIKey  string
 	CSEID   string
@@ -21,6 +24,7 @@ type GoogleConfig struct {
 	Client  *http.Client
 }
 
+// GoogleProvider 基于 Google Custom Search JSON API 实现 Provider。
 type GoogleProvider struct {
 	apiKey  string
 	cseID   string
@@ -28,6 +32,7 @@ type GoogleProvider struct {
 	client  *http.Client
 }
 
+// NewGoogleProvider 创建 GoogleProvider，并在未显式传入 BaseURL/Client 时使用生产默认值。
 func NewGoogleProvider(cfg GoogleConfig) *GoogleProvider {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
@@ -47,6 +52,9 @@ func NewGoogleProvider(cfg GoogleConfig) *GoogleProvider {
 	}
 }
 
+// Search 执行一次 Google Custom Search，并把响应转换为标准 Source。
+//
+// Google 的 num 参数最多为 10，因此这里会在发请求前拒绝更大的 limit。
 func (p *GoogleProvider) Search(ctx context.Context, query string, limit int) ([]Source, error) {
 	if limit < 1 || limit > maxGoogleSearchLimit {
 		return nil, fmt.Errorf("google search query %q: limit %d out of range 1..10", query, limit)

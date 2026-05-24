@@ -15,19 +15,27 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// Researcher 是单个研究子代理的接口。
+//
+// 它接收全局问题、当前 step 和历史执行结果，返回该角色视角下的 findings/sources。
 type Researcher interface {
 	Research(ctx context.Context, in ResearcherInput) (ResearcherResult, error)
 }
 
+// ResearcherMetadata 让 executor 能从 researcher 自身读取角色名和 focus。
+//
+// 这比按数组下标推断角色更稳，尤其适用于 todo dispatcher 动态派发的角色。
 type ResearcherMetadata interface {
 	ResearcherRole() string
 	ResearcherFocus() string
 }
 
+// Synthesizer 负责把多个 researcher 的结果综合为一个 StepExecution。
 type Synthesizer interface {
 	Synthesize(ctx context.Context, in SynthesisInput) (StepExecution, error)
 }
 
+// ResearcherInput 是传给单个 researcher 的上下文。
 type ResearcherInput struct {
 	Question      string
 	Step          ResearchStep
@@ -35,6 +43,7 @@ type ResearcherInput struct {
 	Focus         string
 }
 
+// SynthesisInput 是传给 synthesizer 的完整并行研究结果。
 type SynthesisInput struct {
 	Question      string
 	Step          ResearchStep
@@ -42,21 +51,28 @@ type SynthesisInput struct {
 	Results       []ResearcherResult
 }
 
+// StepExecutionInput 是执行一个 ResearchStep 所需的输入。
 type StepExecutionInput struct {
 	Question      string
 	Step          ResearchStep
 	ExecutedSteps []StepExecution
 }
 
+// ParallelStepExecutor 并行运行多个 researcher，并在至少一个成功时进入 synthesis。
 type ParallelStepExecutor struct {
 	researchers []Researcher
 	synthesizer Synthesizer
 }
 
+// NewParallelStepExecutor 创建一个并行 step executor。
 func NewParallelStepExecutor(researchers []Researcher, synthesizer Synthesizer) *ParallelStepExecutor {
 	return &ParallelStepExecutor{researchers: researchers, synthesizer: synthesizer}
 }
 
+// ExecuteStep 并行调用所有 researcher。
+//
+// 单个 researcher 失败不会导致整个 step 失败；只有全部 researcher 都失败时才返回错误。
+// 这种策略保证反面视角或 freshness 角色失败时，其他证据仍可进入 synthesis。
 func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecutionInput) (StepExecution, error) {
 	if e == nil {
 		return StepExecution{}, fmt.Errorf("parallel step executor is nil")
@@ -118,6 +134,7 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 	})
 }
 
+// allResearchersFailedError 汇总全部 researcher 失败原因，便于上层 retry 或诊断。
 func allResearchersFailedError(results []ResearcherResult, researcherErrors []error) error {
 	errs := []error{errors.New("all researchers failed")}
 	for i, result := range results {
@@ -136,6 +153,7 @@ func allResearchersFailedError(results []ResearcherResult, researcherErrors []er
 	return errors.Join(errs...)
 }
 
+// researcherRoleForIndex 优先使用 researcher 自带 metadata，缺省时回退到历史固定角色顺序。
 func researcherRoleForIndex(i int, researcher Researcher) string {
 	if metadata, ok := researcher.(ResearcherMetadata); ok {
 		if role := strings.TrimSpace(metadata.ResearcherRole()); role != "" {
@@ -145,6 +163,7 @@ func researcherRoleForIndex(i int, researcher Researcher) string {
 	return roleForIndex(i)
 }
 
+// researcherFocusForIndex 优先使用 researcher 自带 focus，缺省时回退到历史固定 focus。
 func researcherFocusForIndex(i int, researcher Researcher) string {
 	if metadata, ok := researcher.(ResearcherMetadata); ok {
 		if focus := strings.TrimSpace(metadata.ResearcherFocus()); focus != "" {
@@ -154,6 +173,7 @@ func researcherFocusForIndex(i int, researcher Researcher) string {
 	return focusForIndex(i)
 }
 
+// isNilDependency 能识别接口里包着 nil 指针的情况，避免 Go interface nil 陷阱。
 func isNilDependency(v any) bool {
 	if v == nil {
 		return true
@@ -167,6 +187,7 @@ func isNilDependency(v any) bool {
 	}
 }
 
+// roleForIndex 是 legacy 固定三角色 fan-out 的兜底命名。
 func roleForIndex(i int) string {
 	switch i {
 	case 0:
@@ -178,6 +199,7 @@ func roleForIndex(i int) string {
 	}
 }
 
+// focusForIndex 是 legacy 固定三角色 fan-out 的兜底研究方向。
 func focusForIndex(i int) string {
 	switch i {
 	case 0:
@@ -189,6 +211,7 @@ func focusForIndex(i int) string {
 	}
 }
 
+// DefaultResearcherRoles 返回 legacy step executor 的默认三角色配置。
 func DefaultResearcherRoles() []string {
 	return []string{
 		"background_researcher",
@@ -197,12 +220,18 @@ func DefaultResearcherRoles() []string {
 	}
 }
 
+// ResearchExecutedStepsSessionKey 保存 legacy planexecute 已完成 StepExecution 的 session key。
 const ResearchExecutedStepsSessionKey = "research_executed_steps"
 
+// EinoParallelExecutor 是 Eino planexecute.Executor 的适配器。
+//
+// 它从 ADK session 中读取当前 ResearchPlan，执行首个 step，并把 StepExecution 重新写回
+// session，供 replanner 判断是否继续。
 type EinoParallelExecutor struct {
 	cfg RunnerConfig
 }
 
+// NewEinoParallelExecutor 创建 legacy Eino executor 适配器。
 func NewEinoParallelExecutor(cfg RunnerConfig) *EinoParallelExecutor {
 	return &EinoParallelExecutor{cfg: cfg}
 }
@@ -215,6 +244,7 @@ func (e *EinoParallelExecutor) Description(_ context.Context) string {
 	return "parallel research executor"
 }
 
+// Run 实现 ADK agent 接口，把同步 step 执行包装成 AsyncIterator。
 func (e *EinoParallelExecutor) Run(ctx context.Context, _ *adk.AgentInput, _ ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 
@@ -247,6 +277,10 @@ func (e *EinoParallelExecutor) Run(ctx context.Context, _ *adk.AgentInput, _ ...
 	return iterator
 }
 
+// run 执行 legacy planexecute 当前 step 的核心逻辑。
+//
+// 这里仍复用 web_search/web_fetch、ParallelStepExecutor 和 evidence normalization，确保
+// legacy 路径与 todo 路径的结果结构尽量一致。
 func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	if e == nil {
 		return StepExecution{}, fmt.Errorf("eino parallel executor is nil")
@@ -322,6 +356,8 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	return normalizeStepExecutionSources(execution), nil
 }
 
+// sourceIDPrefix 为某个 step/todo 生成局部 source ID 前缀，降低并行 researcher 合并时的
+// ID 冲突概率。
 func sourceIDPrefix(stepID string) string {
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" {
@@ -330,6 +366,7 @@ func sourceIDPrefix(stepID string) string {
 	return stepID + "_src"
 }
 
+// buildResearchers 构建 legacy step 流程的固定三角色 researcher。
 func buildResearchers(ctx context.Context, cfg RunnerConfig, researchTools ...tool.BaseTool) ([]Researcher, error) {
 	roles := DefaultResearcherRoles()
 	researchers := make([]Researcher, 0, len(roles))
@@ -343,6 +380,7 @@ func buildResearchers(ctx context.Context, cfg RunnerConfig, researchTools ...to
 	return researchers, nil
 }
 
+// buildTodoResearchers 根据 TodoDispatcher 产出的 job 构建 researcher。
 func buildTodoResearchers(ctx context.Context, cfg RunnerConfig, jobs []TodoResearchJob, researchTools ...tool.BaseTool) ([]Researcher, error) {
 	researchers := make([]Researcher, 0, len(jobs))
 	for _, job := range jobs {
@@ -355,12 +393,14 @@ func buildTodoResearchers(ctx context.Context, cfg RunnerConfig, jobs []TodoRese
 	return researchers, nil
 }
 
+// appendResearchStep 把完成的 legacy StepExecution 追加到 ADK session。
 func appendResearchStep(ctx context.Context, step StepExecution) {
 	steps := getResearchSteps(ctx)
 	steps = append(steps, step)
 	adk.AddSessionValue(ctx, ResearchExecutedStepsSessionKey, steps)
 }
 
+// getResearchSteps 从 ADK session 中读取已完成 step，并返回副本避免调用方修改 session 内部值。
 func getResearchSteps(ctx context.Context) []StepExecution {
 	raw, ok := adk.GetSessionValue(ctx, ResearchExecutedStepsSessionKey)
 	if !ok {
@@ -375,6 +415,7 @@ func getResearchSteps(ctx context.Context) []StepExecution {
 	return out
 }
 
+// formatUserInput 将 ADK session 中可能出现的多种 user input 表示统一成字符串。
 func formatUserInput(raw any) string {
 	switch v := raw.(type) {
 	case string:
@@ -400,6 +441,9 @@ func formatUserInput(raw any) string {
 	}
 }
 
+// decodeResearchStep 解析 plan.FirstStep 的 JSON。
+//
+// 为兼容早期 string step，如果 JSON 解析失败，会退化为一个最小 ResearchStep。
 func decodeResearchStep(stepContent string) (ResearchStep, error) {
 	stepContent = strings.TrimSpace(stepContent)
 	if stepContent == "" {

@@ -23,10 +23,16 @@ func main() {
 }
 
 var (
+	// newOpenAICompatibleModel 和 stdinIsInteractive 是测试替换点，避免 CLI 测试真的创建模型或
+	// 依赖真实终端。
 	newOpenAICompatibleModel = research.NewOpenAICompatibleModel
 	stdinIsInteractive       = isInteractiveStdin
 )
 
+// run 是 CLI 的可测试入口。
+//
+// 它负责解析 flag、加载配置、创建 provider/model/runner，并根据 --plan-only、--yes、
+// output.format 等选项决定只预览 plan 还是完整执行。
 func run(args []string) int {
 	fs := flag.NewFlagSet("research", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -209,6 +215,7 @@ func run(args []string) int {
 	return 0
 }
 
+// flagProvided 判断某个 flag 是否由用户显式提供，用于区分默认值和命令行覆盖。
 func flagProvided(fs *flag.FlagSet, name string) bool {
 	provided := false
 	fs.Visit(func(f *flag.Flag) {
@@ -219,6 +226,9 @@ func flagProvided(fs *flag.FlagSet, name string) bool {
 	return provided
 }
 
+// isInteractiveStdin 判断当前 stdin 是否是终端。
+//
+// 非交互环境必须显式使用 --yes 或 --plan-only，避免脚本误触发长时间执行。
 func isInteractiveStdin() bool {
 	info, err := os.Stdin.Stat()
 	if err != nil {
@@ -227,6 +237,7 @@ func isInteractiveStdin() bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
+// confirmPlanExecution 在交互模式下向用户确认是否执行 planner 生成的 todo plan。
 func confirmPlanExecution() (bool, error) {
 	fmt.Fprint(os.Stderr, "Continue and execute this plan? [y/N] ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -237,6 +248,7 @@ func confirmPlanExecution() (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
+// renderTodoPlanPreview 把 ResearchTodoPlan 渲染为人类可审阅的执行预览。
 func renderTodoPlanPreview(plan research.ResearchTodoPlan) string {
 	var sb strings.Builder
 	sb.WriteString("Objective: ")

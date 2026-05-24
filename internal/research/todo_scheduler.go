@@ -7,14 +7,17 @@ import (
 	"sync"
 )
 
+// TodoExecutorInput 是调度器调用单个 todo executor 时传入的上下文。
 type TodoExecutorInput struct {
 	Plan                 ResearchTodoPlan
 	Todo                 ResearchTodo
 	DependencyExecutions []TodoExecution
 }
 
+// TodoExecutor 执行一个已满足依赖的 todo。
 type TodoExecutor func(context.Context, TodoExecutorInput) (TodoExecution, error)
 
+// TodoReplannerInput 是 todo 失败后传给 replanner 的上下文。
 type TodoReplannerInput struct {
 	Plan      ResearchTodoPlan
 	Completed []TodoExecution
@@ -22,20 +25,26 @@ type TodoReplannerInput struct {
 	Blocked   []TodoExecution
 }
 
+// TodoReplanner 可以在 todo 失败后返回 plan patch，用于跳过、补充或调整后续 todo。
 type TodoReplanner func(context.Context, TodoReplannerInput) (ResearchTodoPlanPatch, error)
 
+// TodoSchedulerConfig 控制 todo 调度并发度和可选 replanner。
 type TodoSchedulerConfig struct {
 	MaxParallel int
 	Executor    TodoExecutor
 	Replanner   TodoReplanner
 }
 
+// TodoScheduler 按 ResearchTodoPlan 的依赖图执行 todo。
+//
+// 它保证依赖先于被依赖 todo 执行；独立分支可以并发；失败依赖会让下游 todo 进入 blocked。
 type TodoScheduler struct {
 	maxParallel int
 	executor    TodoExecutor
 	replanner   TodoReplanner
 }
 
+// NewTodoScheduler 创建调度器，并为 MaxParallel 填充默认值。
 func NewTodoScheduler(cfg TodoSchedulerConfig) (*TodoScheduler, error) {
 	if cfg.Executor == nil {
 		return nil, fmt.Errorf("todo executor is required")
@@ -46,6 +55,9 @@ func NewTodoScheduler(cfg TodoSchedulerConfig) (*TodoScheduler, error) {
 	return &TodoScheduler{maxParallel: cfg.MaxParallel, executor: cfg.Executor, replanner: cfg.Replanner}, nil
 }
 
+// Run 执行整个 todo plan。
+//
+// 返回结果按实际完成顺序追加；报告层会再按 plan 顺序重新分组展示。
 func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoExecution, error) {
 	if s == nil {
 		return nil, fmt.Errorf("todo scheduler is nil")
@@ -110,6 +122,7 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 	return executions, nil
 }
 
+// runBatch 并发执行一批当前 runnable 的 todos。
 func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, todos []ResearchTodo, completed map[string]TodoExecution) []TodoExecution {
 	results := make([]TodoExecution, len(todos))
 	var wg sync.WaitGroup
@@ -146,6 +159,9 @@ func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, tod
 	return results
 }
 
+// replanAfterFailure 在 todo 失败后尝试应用 replanner patch。
+//
+// replanner 失败或 patch 非法时会保留原 plan，避免错误恢复逻辑进一步破坏执行状态。
 func (s *TodoScheduler) replanAfterFailure(ctx context.Context, plan ResearchTodoPlan, pending map[string]ResearchTodo, completed map[string]TodoExecution, failed TodoExecution) ResearchTodoPlan {
 	if s.replanner == nil {
 		return plan
@@ -169,6 +185,7 @@ func (s *TodoScheduler) replanAfterFailure(ctx context.Context, plan ResearchTod
 	return patched
 }
 
+// runnableTodos 按 plan 顺序选择依赖已完成的 pending todo，并受 limit 限制。
 func runnableTodos(plan ResearchTodoPlan, pending map[string]ResearchTodo, completed map[string]TodoExecution, limit int) []ResearchTodo {
 	out := make([]ResearchTodo, 0, limit)
 	for _, todo := range plan.Todos {
@@ -187,6 +204,7 @@ func runnableTodos(plan ResearchTodoPlan, pending map[string]ResearchTodo, compl
 	return out
 }
 
+// blockTodosWithTerminalDependencies 递归标记依赖失败/跳过/blocked 的下游 todo。
 func blockTodosWithTerminalDependencies(plan ResearchTodoPlan, pending map[string]ResearchTodo, completed map[string]TodoExecution) []TodoExecution {
 	var blocked []TodoExecution
 	for {
@@ -215,6 +233,7 @@ func blockTodosWithTerminalDependencies(plan ResearchTodoPlan, pending map[strin
 	}
 }
 
+// todoDependenciesDone 判断 todo 的所有依赖是否都已成功完成。
 func todoDependenciesDone(todo ResearchTodo, completed map[string]TodoExecution) bool {
 	for _, dep := range todo.DependsOn {
 		execution, ok := completed[strings.TrimSpace(dep)]
@@ -225,6 +244,7 @@ func todoDependenciesDone(todo ResearchTodo, completed map[string]TodoExecution)
 	return true
 }
 
+// todoHasTerminalFailedDependency 判断 todo 是否存在不可恢复的失败依赖。
 func todoHasTerminalFailedDependency(todo ResearchTodo, completed map[string]TodoExecution) bool {
 	for _, dep := range todo.DependsOn {
 		execution, ok := completed[strings.TrimSpace(dep)]
@@ -239,6 +259,7 @@ func todoHasTerminalFailedDependency(todo ResearchTodo, completed map[string]Tod
 	return false
 }
 
+// dependencyExecutions 按 todo.DependsOn 顺序取出已完成的依赖结果。
 func dependencyExecutions(todo ResearchTodo, completed map[string]TodoExecution) []TodoExecution {
 	out := make([]TodoExecution, 0, len(todo.DependsOn))
 	for _, dep := range todo.DependsOn {
@@ -249,6 +270,7 @@ func dependencyExecutions(todo ResearchTodo, completed map[string]TodoExecution)
 	return out
 }
 
+// remainingTodosInPlanOrder 按 plan 顺序返回仍在 pending 中的 todo。
 func remainingTodosInPlanOrder(plan ResearchTodoPlan, pending map[string]ResearchTodo) []ResearchTodo {
 	out := make([]ResearchTodo, 0, len(pending))
 	for _, todo := range plan.Todos {
@@ -259,6 +281,7 @@ func remainingTodosInPlanOrder(plan ResearchTodoPlan, pending map[string]Researc
 	return out
 }
 
+// completedExecutionsInPlanOrder 按 plan 顺序返回 completed execution，供 replanner 观察当前进展。
 func completedExecutionsInPlanOrder(plan ResearchTodoPlan, completed map[string]TodoExecution) []TodoExecution {
 	out := make([]TodoExecution, 0, len(completed))
 	for _, todo := range plan.Todos {
@@ -269,6 +292,9 @@ func completedExecutionsInPlanOrder(plan ResearchTodoPlan, completed map[string]
 	return out
 }
 
+// syncPendingWithPlan 在 replanner patch 后同步 pending 集合。
+//
+// 已完成 todo 不会重新进入 pending；新增 todo 会被加入，已跳过或被删除的 todo 会移除。
 func syncPendingWithPlan(pending map[string]ResearchTodo, plan ResearchTodoPlan, completed map[string]TodoExecution) {
 	planTodos := make(map[string]ResearchTodo, len(plan.Todos))
 	for _, todo := range plan.Todos {

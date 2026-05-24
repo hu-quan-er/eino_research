@@ -7,6 +7,10 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/research"
 )
 
+// Markdown 将 ResearchResult 渲染为终端友好的 Markdown 报告。
+//
+// 如果模型已经给出 Answer.Markdown，会保留正文并追加执行摘要、证据和 sources；否则会从
+// 结构化字段生成标准报告。
 func Markdown(result research.ResearchResult) string {
 	if result.Answer.Markdown != "" {
 		var sb strings.Builder
@@ -32,6 +36,7 @@ func Markdown(result research.ResearchResult) string {
 	return strings.TrimSpace(sb.String()) + "\n"
 }
 
+// appendAnswerDetails 渲染结构化 key findings 和 limitations。
 func appendAnswerDetails(sb *strings.Builder, answer research.Answer) {
 	if len(answer.KeyFindings) > 0 {
 		sb.WriteString("## Key Findings\n\n")
@@ -58,6 +63,7 @@ func appendAnswerDetails(sb *strings.Builder, answer research.Answer) {
 	}
 }
 
+// appendExecutionSummary 渲染按 section 分组的 todo 执行状态。
 func appendExecutionSummary(sb *strings.Builder, result research.ResearchResult) {
 	if len(result.SectionExecutions) == 0 {
 		return
@@ -82,6 +88,7 @@ func appendExecutionSummary(sb *strings.Builder, result research.ResearchResult)
 	}
 }
 
+// todoSummaryTitle 选择 todo 在报告中展示的标题。
 func todoSummaryTitle(todo research.ResearchTodo) string {
 	if title := strings.TrimSpace(todo.Title); title != "" {
 		return title
@@ -92,6 +99,7 @@ func todoSummaryTitle(todo research.ResearchTodo) string {
 	return todo.ID
 }
 
+// appendSources 渲染最终去重后的 source 列表。
 func appendSources(sb *strings.Builder, result research.ResearchResult) {
 	if len(result.Sources) == 0 {
 		return
