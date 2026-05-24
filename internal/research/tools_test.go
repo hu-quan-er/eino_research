@@ -103,6 +103,34 @@ func TestWebFetchToolFetchesHTMLContent(t *testing.T) {
 	}
 }
 
+func TestWebFetchToolRecordsFetchedPages(t *testing.T) {
+	fetcher := &recordingFetcher{}
+	recorder := NewFetchedPageStore()
+	tool, err := NewWebFetchTool(fetcher, FetchLimits{
+		MaxFetchesPerStep: 2,
+		MaxContentChars:   1000,
+		Recorder:          recorder,
+	})
+	if err != nil {
+		t.Fatalf("NewWebFetchTool: %v", err)
+	}
+
+	if _, err := tool.InvokableRun(context.Background(), `{"url":"https://example.com/recorded"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+
+	pages := recorder.Pages()
+	if len(pages) != 1 {
+		t.Fatalf("recorded pages = %d, want 1", len(pages))
+	}
+	if pages[0].URL != "https://example.com/recorded" {
+		t.Fatalf("recorded URL = %q, want https://example.com/recorded", pages[0].URL)
+	}
+	if pages[0].Text != "Recorded content" {
+		t.Fatalf("recorded text = %q, want Recorded content", pages[0].Text)
+	}
+}
+
 func TestWebFetchToolEnforcesLimit(t *testing.T) {
 	fetcher := &recordingFetcher{}
 	tool, err := NewWebFetchTool(fetcher, FetchLimits{MaxFetchesPerStep: 1, MaxContentChars: 1000})

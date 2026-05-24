@@ -33,6 +33,74 @@ func TestBuildSourceDocumentsCreatesChunksFromSnippets(t *testing.T) {
 	}
 }
 
+func TestBuildFetchedPageDocumentsUsesFullFetchedText(t *testing.T) {
+	docs := buildFetchedPageDocuments([]FetchedPage{{
+		URL:   "https://example.com/evidence",
+		Title: "Fetched Evidence",
+		Text:  "Fetched body contains more complete evidence than the snippet.",
+	}}, []search.Source{{
+		ID:      "src_1",
+		Title:   "Snippet Evidence",
+		URL:     "https://example.com/evidence",
+		Snippet: "Short snippet.",
+	}}, 200)
+
+	if len(docs) != 1 {
+		t.Fatalf("documents = %d, want 1", len(docs))
+	}
+	if docs[0].SourceID != "src_1" {
+		t.Fatalf("source id = %q, want src_1", docs[0].SourceID)
+	}
+	if len(docs[0].Chunks) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(docs[0].Chunks))
+	}
+	if docs[0].Chunks[0].Text != "Fetched body contains more complete evidence than the snippet." {
+		t.Fatalf("chunk text = %q, want fetched body", docs[0].Chunks[0].Text)
+	}
+}
+
+func TestNormalizeStepExecutionPrefersFetchedDocumentsOverSnippets(t *testing.T) {
+	step := StepExecution{
+		Step: ResearchStep{ID: "step_1", Question: "What evidence exists?"},
+		ResearcherResults: []ResearcherResult{{
+			Role: "evidence_researcher",
+			Findings: []Finding{{
+				Claim:     "Fetched evidence is used.",
+				SourceIDs: []string{"src_1"},
+			}},
+			Sources: []search.Source{{
+				ID:      "src_1",
+				Title:   "Snippet Evidence",
+				URL:     "https://example.com/evidence",
+				Snippet: "Short snippet.",
+			}},
+		}},
+		Documents: buildFetchedPageDocuments([]FetchedPage{{
+			URL:   "https://example.com/evidence",
+			Title: "Fetched Evidence",
+			Text:  "Fetched full body evidence should become the cited chunk.",
+		}}, []search.Source{{
+			ID:      "src_1",
+			Title:   "Snippet Evidence",
+			URL:     "https://example.com/evidence",
+			Snippet: "Short snippet.",
+		}}, 200),
+	}
+
+	normalized := normalizeStepExecutionSources(step)
+
+	if len(normalized.Documents) != 1 {
+		t.Fatalf("documents = %d, want 1", len(normalized.Documents))
+	}
+	if normalized.Documents[0].Chunks[0].Text != "Fetched full body evidence should become the cited chunk." {
+		t.Fatalf("chunk text = %q, want fetched body", normalized.Documents[0].Chunks[0].Text)
+	}
+	ref := normalized.ResearcherResults[0].Findings[0].EvidenceRefs[0]
+	if ref.Quote != "Fetched full body evidence should become the cited chunk." {
+		t.Fatalf("quote = %q, want fetched body quote", ref.Quote)
+	}
+}
+
 func TestNormalizeStepExecutionAddsEvidenceRefs(t *testing.T) {
 	step := StepExecution{
 		Step: ResearchStep{ID: "step_1", Question: "What evidence exists?"},

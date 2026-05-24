@@ -358,9 +358,11 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	if err != nil {
 		return TodoExecution{}, fmt.Errorf("new web search tool: %w", err)
 	}
+	fetchedPages := NewFetchedPageStore()
 	fetchTool, err := NewWebFetchTool(HTTPPageFetcher{}, FetchLimits{
 		MaxFetchesPerStep: maxSearches,
 		MaxContentChars:   4000,
+		Recorder:          fetchedPages,
 	})
 	if err != nil {
 		return TodoExecution{}, fmt.Errorf("new web fetch tool: %w", err)
@@ -382,7 +384,15 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 			if strings.TrimSpace(input.Step.ID) == "" {
 				input.Step = step
 			}
-			return stepExecutor.ExecuteStep(ctx, input)
+			execution, err := stepExecutor.ExecuteStep(ctx, input)
+			if err != nil {
+				return StepExecution{}, err
+			}
+			execution.Documents = mergeSourceDocuments(
+				buildFetchedPageDocuments(fetchedPages.Pages(), execution.Sources, defaultSourceChunkChars),
+				execution.Documents,
+			)
+			return execution, nil
 		},
 	})
 	if err != nil {

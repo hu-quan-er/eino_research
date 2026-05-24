@@ -42,6 +42,56 @@ func buildSourceDocuments(sources []search.Source, maxChunkChars int) []SourceDo
 	return documents
 }
 
+func buildFetchedPageDocuments(pages []FetchedPage, sources []search.Source, maxChunkChars int) []SourceDocument {
+	if maxChunkChars <= 0 {
+		maxChunkChars = defaultSourceChunkChars
+	}
+
+	sourceByURL := make(map[string]search.Source, len(sources))
+	for _, source := range sources {
+		if url := strings.TrimSpace(source.URL); url != "" {
+			sourceByURL[url] = source
+		}
+	}
+
+	documents := make([]SourceDocument, 0, len(pages))
+	seenURL := make(map[string]struct{}, len(pages))
+	nextFetchedID := 1
+	for _, page := range pages {
+		page.URL = strings.TrimSpace(page.URL)
+		page.Text = strings.TrimSpace(page.Text)
+		if page.URL == "" || page.Text == "" {
+			continue
+		}
+		if _, ok := seenURL[page.URL]; ok {
+			continue
+		}
+		seenURL[page.URL] = struct{}{}
+
+		source, ok := sourceByURL[page.URL]
+		sourceID := strings.TrimSpace(source.ID)
+		if !ok || sourceID == "" {
+			sourceID = fmt.Sprintf("fetched_%d", nextFetchedID)
+			nextFetchedID++
+		}
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			title = source.Title
+		}
+		documentID := sourceID + "_doc"
+		documents = append(documents, SourceDocument{
+			ID:       documentID,
+			SourceID: sourceID,
+			Title:    title,
+			URL:      page.URL,
+			Provider: source.Provider,
+			Query:    source.Query,
+			Chunks:   chunkSourceText(sourceID, documentID, normalizeWhitespace(page.Text), maxChunkChars),
+		})
+	}
+	return documents
+}
+
 func sourceDocumentText(source search.Source) string {
 	text := strings.TrimSpace(source.Snippet)
 	if text != "" {
@@ -86,7 +136,7 @@ func enrichResearcherEvidence(results []ResearcherResult, documents []SourceDocu
 	out := make([]ResearcherResult, len(results))
 	for i, result := range results {
 		result.Findings = enrichFindingsEvidence(result.Findings, documents)
-		result.Documents = buildSourceDocuments(result.Sources, defaultSourceChunkChars)
+		result.Documents = mergeSourceDocuments(result.Documents, buildSourceDocuments(result.Sources, defaultSourceChunkChars))
 		out[i] = result
 	}
 	return out

@@ -291,9 +291,11 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	if err != nil {
 		return StepExecution{}, fmt.Errorf("new web search tool: %w", err)
 	}
+	fetchedPages := NewFetchedPageStore()
 	fetchTool, err := NewWebFetchTool(HTTPPageFetcher{}, FetchLimits{
 		MaxFetchesPerStep: e.cfg.MaxSearchesPerStep,
 		MaxContentChars:   4000,
+		Recorder:          fetchedPages,
 	})
 	if err != nil {
 		return StepExecution{}, fmt.Errorf("new web fetch tool: %w", err)
@@ -313,6 +315,10 @@ func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
 	if err != nil {
 		return StepExecution{}, err
 	}
+	execution.Documents = mergeSourceDocuments(
+		buildFetchedPageDocuments(fetchedPages.Pages(), execution.Sources, defaultSourceChunkChars),
+		execution.Documents,
+	)
 	return normalizeStepExecutionSources(execution), nil
 }
 

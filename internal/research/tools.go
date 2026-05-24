@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -25,6 +26,7 @@ type FetchLimits struct {
 	MaxFetchesPerStep int
 	MaxContentChars   int
 	MaxBodyBytes      int64
+	Recorder          FetchedPageRecorder
 }
 
 type WebSearchInput struct {
@@ -46,6 +48,44 @@ type FetchedPage struct {
 
 type PageFetcher interface {
 	Fetch(ctx context.Context, url string, maxChars int) (FetchedPage, error)
+}
+
+type FetchedPageRecorder interface {
+	RecordFetchedPage(page FetchedPage)
+}
+
+type FetchedPageStore struct {
+	mu    sync.Mutex
+	pages []FetchedPage
+}
+
+func NewFetchedPageStore() *FetchedPageStore {
+	return &FetchedPageStore{}
+}
+
+func (s *FetchedPageStore) RecordFetchedPage(page FetchedPage) {
+	if s == nil {
+		return
+	}
+	if strings.TrimSpace(page.URL) == "" || strings.TrimSpace(page.Text) == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pages = append(s.pages, page)
+}
+
+func (s *FetchedPageStore) Pages() []FetchedPage {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]FetchedPage, len(s.pages))
+	copy(out, s.pages)
+	return out
 }
 
 type HTTPPageFetcher struct {
@@ -109,7 +149,14 @@ func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits) (tool.InvokableToo
 		if input.MaxChars > 0 && input.MaxChars < maxChars {
 			maxChars = input.MaxChars
 		}
-		return fetcher.Fetch(ctx, input.URL, maxChars)
+		page, err := fetcher.Fetch(ctx, input.URL, maxChars)
+		if err != nil {
+			return FetchedPage{}, err
+		}
+		if limits.Recorder != nil {
+			limits.Recorder.RecordFetchedPage(page)
+		}
+		return page, nil
 	})
 }
 

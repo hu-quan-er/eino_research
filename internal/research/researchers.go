@@ -51,9 +51,10 @@ Use web_search to discover sources and web_fetch to read important source URLs w
   "queries": [string],
   "findings": [{"claim": string, "rationale": string, "source_ids": [string], "evidence_refs": [{"source_id": string, "quote": string}]}],
   "sources": [{"id": string, "title": string, "url": string, "snippet": string, "provider": string, "query": string}],
+  "documents": [{"source_id": string, "title": string, "url": string, "chunks": [{"text": string}]}],
   "errors": [string]
 }
-Use source_ids and evidence_refs for every source-backed claim. Do not wrap the JSON in markdown.`, role, focus),
+Use source_ids and evidence_refs for every source-backed claim. When web_fetch provides important page text, include it as documents/chunks if useful. Do not wrap the JSON in markdown.`, role, focus),
 		Model: m,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
@@ -160,7 +161,7 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	}
 
 	resp, err := s.model.Generate(ctx, []*schema.Message{
-		schema.SystemMessage(`You synthesize parallel researcher outputs into one StepExecution. Return only valid JSON with fields step, researcher_results, summary, gaps, and sources. Preserve source_ids and evidence_refs for source-backed findings.`),
+		schema.SystemMessage(`You synthesize parallel researcher outputs into one StepExecution. Return only valid JSON with fields step, researcher_results, summary, gaps, sources, and documents. Preserve source_ids, evidence_refs, and document chunks for source-backed findings.`),
 		schema.UserMessage(string(b)),
 	})
 	if err != nil {
@@ -202,7 +203,7 @@ func collectResearcherSources(results []ResearcherResult) []search.Source {
 func normalizeStepExecutionSources(execution StepExecution) StepExecution {
 	results, researcherSources := normalizeResearcherSources(execution.ResearcherResults)
 	sources := mergeSources(researcherSources, execution.Sources)
-	documents := mergeSourceDocuments(buildSourceDocuments(sources, defaultSourceChunkChars), execution.Documents)
+	documents := mergeSourceDocuments(execution.Documents, buildSourceDocuments(sources, defaultSourceChunkChars))
 	results = enrichResearcherEvidence(results, documents)
 	execution.ResearcherResults = results
 	execution.Sources = sources

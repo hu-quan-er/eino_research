@@ -57,10 +57,11 @@
 - `TodoExecution` 和 `ResearchResult` 都会保留 `documents`。
 - 如果模型只返回旧字段 `source_ids`，系统会从对应 source 的首个 chunk 自动生成 `EvidenceRef`。
 - 如果模型返回了 `evidence_refs` 但缺少 chunk id，系统会用对应 source 的首个 chunk 补齐。
+- `web_fetch` 现在会把抓到的 `FetchedPage` 写入 recorder；step/todo 执行结束时会把 fetched 正文合并为 `SourceDocument`。
+- fetched 正文 document 优先于搜索 snippet document，用于后续 chunk 引用。
 
 后续注意：
 
-- 当前 documents 主要来自搜索 snippet/title；后续应把 `web_fetch` 正文直接沉淀为更完整的 `SourceDocument`。
 - 长文档需要 chunk overlap、段落边界和 chunk relevance scoring。
 - 最终 report renderer 应优先使用 `evidence_refs`，而不是只列 source URLs。
 
