@@ -75,6 +75,89 @@ func TestMarkdownIncludesExecutionSummary(t *testing.T) {
 	}
 }
 
+func TestMarkdownIncludesTodoFindingsAndEvidenceRefs(t *testing.T) {
+	result := sampleResult()
+	result.TodoExecutions = []research.TodoExecution{{
+		Todo: research.ResearchTodo{
+			ID:    "todo_background",
+			Title: "Clarify core terms",
+		},
+		Status: research.TodoDone,
+		Findings: []research.Finding{{
+			Claim:     "Eino provides an agent framework.",
+			Rationale: "It ships reusable orchestration components.",
+			SourceIDs: []string{"src_1"},
+			EvidenceRefs: []research.EvidenceRef{{
+				SourceID: "src_1",
+				ChunkID:  "src_1_chunk_1",
+				Quote:    "Eino includes model orchestration and tool execution.",
+			}},
+		}},
+	}}
+	result.Documents = []research.SourceDocument{{
+		ID:       "src_1_doc",
+		SourceID: "src_1",
+		Title:    "Eino",
+		URL:      "https://example.com/eino",
+		Chunks: []research.SourceChunk{{
+			ID:         "src_1_chunk_1",
+			DocumentID: "src_1_doc",
+			SourceID:   "src_1",
+			Text:       "Eino includes model orchestration and tool execution.",
+		}},
+	}}
+
+	out := Markdown(result)
+	for _, want := range []string{
+		"## Findings and Evidence",
+		"### todo_background: Clarify core terms",
+		"- Eino provides an agent framework. [src_1]",
+		"  - Rationale: It ships reusable orchestration components.",
+		`  - Evidence: "Eino includes model orchestration and tool execution." (Source: src_1 Eino - https://example.com/eino, chunk ` + "`src_1_chunk_1`" + `)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Markdown missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestMarkdownFallsBackToDocumentChunkEvidence(t *testing.T) {
+	result := sampleResult()
+	result.TodoExecutions = []research.TodoExecution{{
+		Todo: research.ResearchTodo{
+			ID:    "todo_evidence",
+			Title: "Collect evidence",
+		},
+		Status: research.TodoDone,
+		Findings: []research.Finding{{
+			Claim:     "Fetched pages can provide fuller evidence.",
+			SourceIDs: []string{"src_1"},
+		}},
+	}}
+	result.Documents = []research.SourceDocument{{
+		ID:       "src_1_doc",
+		SourceID: "src_1",
+		Title:    "Eino",
+		URL:      "https://example.com/eino",
+		Chunks: []research.SourceChunk{{
+			ID:         "src_1_chunk_1",
+			DocumentID: "src_1_doc",
+			SourceID:   "src_1",
+			Text:       "Fetched full page text is available for evidence rendering.",
+		}},
+	}}
+
+	out := Markdown(result)
+	for _, want := range []string{
+		"- Fetched pages can provide fuller evidence. [src_1]",
+		`  - Evidence: "Fetched full page text is available for evidence rendering." (Source: src_1 Eino - https://example.com/eino, chunk ` + "`src_1_chunk_1`" + `)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Markdown missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestJSONIsResearchResult(t *testing.T) {
 	out, err := JSON(sampleResult())
 	if err != nil {

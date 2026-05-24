@@ -10,9 +10,10 @@ import (
 func Markdown(result research.ResearchResult) string {
 	if result.Answer.Markdown != "" {
 		var sb strings.Builder
-		sb.WriteString(result.Answer.Markdown)
+		sb.WriteString(strings.TrimSpace(result.Answer.Markdown))
 		sb.WriteString("\n\n")
 		appendExecutionSummary(&sb, result)
+		appendFindingsAndEvidence(&sb, result)
 		appendSources(&sb, result)
 		return strings.TrimSpace(sb.String()) + "\n"
 	}
@@ -24,9 +25,37 @@ func Markdown(result research.ResearchResult) string {
 	sb.WriteString("\n\n## Summary\n\n")
 	sb.WriteString(result.Answer.Summary)
 	sb.WriteString("\n\n")
+	appendAnswerDetails(&sb, result.Answer)
 	appendExecutionSummary(&sb, result)
+	appendFindingsAndEvidence(&sb, result)
 	appendSources(&sb, result)
 	return strings.TrimSpace(sb.String()) + "\n"
+}
+
+func appendAnswerDetails(sb *strings.Builder, answer research.Answer) {
+	if len(answer.KeyFindings) > 0 {
+		sb.WriteString("## Key Findings\n\n")
+		for _, finding := range answer.KeyFindings {
+			if finding = inlineText(finding); finding != "" {
+				sb.WriteString("- ")
+				sb.WriteString(finding)
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(answer.Limitations) > 0 {
+		sb.WriteString("## Limitations\n\n")
+		for _, limitation := range answer.Limitations {
+			if limitation = inlineText(limitation); limitation != "" {
+				sb.WriteString("- ")
+				sb.WriteString(limitation)
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
 }
 
 func appendExecutionSummary(sb *strings.Builder, result research.ResearchResult) {

@@ -158,3 +158,28 @@ TodoScheduler
 - 配置层已暴露：
   - `research.max_researchers_per_todo`
   - `research.max_todo_research_iterations`
+
+## 最终报告证据渲染
+
+问题：
+
+前面已经在执行层保留了 `evidence_refs`、`SourceDocument` 和 `SourceChunk`，但 Markdown renderer 仍然主要输出 answer、执行摘要和 source URL。这样最终用户看到的报告仍然缺少 claim-level evidence，无法直接核对每条 finding 的依据。
+
+当前选择：
+
+- 不改变 JSON 输出结构，继续完整暴露底层 `ResearchResult`。
+- Markdown 输出新增 `Findings and Evidence` 段落。
+- 该段落按 todo 展示 findings，保留 claim、rationale、source id、chunk id 和短 quote。
+- 若模型已经给出 `EvidenceRef.quote`，优先使用模型给出的 quote。
+- 若 finding 只有 `source_ids`，renderer 从对应 `SourceDocument` 的首个 chunk 回退生成 evidence quote。
+
+当前行为：
+
+- 自定义 `Answer.markdown` 存在时，仍保留模型生成的正文，并在正文后追加执行摘要、findings/evidence 和 sources。
+- 没有自定义 markdown 时，标准报告会输出 question、summary、key findings、limitations、执行摘要、findings/evidence 和 sources。
+- 证据 quote 会压缩空白并限制长度，避免长 chunk 直接撑爆报告。
+
+后续注意：
+
+- 还可以把 citation 格式升级为脚注或链接锚点，减少正文噪音。
+- 更强的版本应支持按 answer paragraph 自动反查 evidence refs，而不仅是按 todo findings 输出。
