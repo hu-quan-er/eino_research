@@ -2,17 +2,13 @@ package research
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"sync"
 
-	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
 )
 
 // Researcher 是单个研究子代理的接口。
@@ -224,152 +220,6 @@ func focusForIndex(i int) string {
 	}
 }
 
-// DefaultResearcherRoles 返回 legacy step executor 的默认三角色配置。
-func DefaultResearcherRoles() []string {
-	return []string{
-		"background_researcher",
-		"evidence_researcher",
-		"counterpoint_researcher",
-	}
-}
-
-// ResearchExecutedStepsSessionKey 保存 legacy planexecute 已完成 StepExecution 的 session key。
-const ResearchExecutedStepsSessionKey = "research_executed_steps"
-
-// EinoParallelExecutor 是 Eino planexecute.Executor 的适配器。
-//
-// 它从 ADK session 中读取当前 ResearchPlan，执行首个 step，并把 StepExecution 重新写回
-// session，供 replanner 判断是否继续。
-type EinoParallelExecutor struct {
-	// cfg 保存 legacy executor 运行 researcher 所需的模型、搜索 provider 和预算。
-	cfg RunnerConfig
-}
-
-// NewEinoParallelExecutor 创建 legacy Eino executor 适配器。
-func NewEinoParallelExecutor(cfg RunnerConfig) *EinoParallelExecutor {
-	return &EinoParallelExecutor{cfg: cfg}
-}
-
-func (e *EinoParallelExecutor) Name(_ context.Context) string {
-	return "executor"
-}
-
-func (e *EinoParallelExecutor) Description(_ context.Context) string {
-	return "parallel research executor"
-}
-
-// Run 实现 ADK agent 接口，把同步 step 执行包装成 AsyncIterator。
-func (e *EinoParallelExecutor) Run(ctx context.Context, _ *adk.AgentInput, _ ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
-	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
-
-	go func() {
-		defer generator.Close()
-		defer func() {
-			if panicErr := recover(); panicErr != nil {
-				generator.Send(&adk.AgentEvent{Err: fmt.Errorf("research executor panic: %v", panicErr)})
-			}
-		}()
-
-		step, err := e.run(ctx)
-		if err != nil {
-			generator.Send(&adk.AgentEvent{Err: err})
-			return
-		}
-
-		b, err := json.Marshal(step)
-		if err != nil {
-			generator.Send(&adk.AgentEvent{Err: fmt.Errorf("marshal step execution: %w", err)})
-			return
-		}
-
-		content := string(b)
-		adk.AddSessionValue(ctx, planexecute.ExecutedStepSessionKey, content)
-		appendResearchStep(ctx, step)
-		generator.Send(adk.EventFromMessage(schema.AssistantMessage(content, nil), nil, schema.Assistant, ""))
-	}()
-
-	return iterator
-}
-
-// run 执行 legacy planexecute 当前 step 的核心逻辑。
-//
-// 这里仍复用 web_search/web_fetch、ParallelStepExecutor 和 evidence normalization，确保
-// legacy 路径与 todo 路径的结果结构尽量一致。
-func (e *EinoParallelExecutor) run(ctx context.Context) (StepExecution, error) {
-	if e == nil {
-		return StepExecution{}, fmt.Errorf("eino parallel executor is nil")
-	}
-	if isNilDependency(e.cfg.Model) {
-		return StepExecution{}, fmt.Errorf("model is nil")
-	}
-	if isNilDependency(e.cfg.SearchProvider) {
-		return StepExecution{}, fmt.Errorf("search provider is nil")
-	}
-
-	rawPlan, ok := adk.GetSessionValue(ctx, planexecute.PlanSessionKey)
-	if !ok {
-		return StepExecution{}, fmt.Errorf("plan not found in session")
-	}
-	plan, ok := rawPlan.(*ResearchPlan)
-	if !ok {
-		return StepExecution{}, fmt.Errorf("plan session value has type %T, want *ResearchPlan", rawPlan)
-	}
-	if err := plan.Validate(); err != nil {
-		return StepExecution{}, fmt.Errorf("invalid research plan: %w", err)
-	}
-
-	step, err := decodeResearchStep(plan.FirstStep())
-	if err != nil {
-		return StepExecution{}, err
-	}
-
-	var question string
-	if rawUserInput, ok := adk.GetSessionValue(ctx, planexecute.UserInputSessionKey); ok {
-		question = formatUserInput(rawUserInput)
-	}
-	if strings.TrimSpace(question) == "" {
-		question = step.Question
-	}
-
-	searchTool, err := NewWebSearchTool(e.cfg.SearchProvider, SearchLimits{
-		MaxSearchesPerStep: e.cfg.MaxSearchesPerStep,
-		ResultsPerSearch:   e.cfg.ResultsPerSearch,
-		SourceIDPrefix:     sourceIDPrefix(step.ID),
-	})
-	if err != nil {
-		return StepExecution{}, fmt.Errorf("new web search tool: %w", err)
-	}
-	fetchedPages := NewFetchedPageStore()
-	fetchTool, err := NewWebFetchTool(HTTPPageFetcher{}, FetchLimits{
-		MaxFetchesPerStep: e.cfg.MaxSearchesPerStep,
-		MaxContentChars:   4000,
-		Recorder:          fetchedPages,
-	})
-	if err != nil {
-		return StepExecution{}, fmt.Errorf("new web fetch tool: %w", err)
-	}
-
-	researchers, err := buildResearchers(ctx, e.cfg, searchTool, fetchTool)
-	if err != nil {
-		return StepExecution{}, err
-	}
-
-	executor := NewParallelStepExecutor(researchers, NewAgentSynthesizer(e.cfg.Model))
-	execution, err := executor.ExecuteStep(ctx, StepExecutionInput{
-		Question:      question,
-		Step:          step,
-		ExecutedSteps: getResearchSteps(ctx),
-	})
-	if err != nil {
-		return StepExecution{}, err
-	}
-	execution.Documents = mergeSourceDocuments(
-		buildFetchedPageDocuments(fetchedPages.Pages(), execution.Sources, defaultSourceChunkChars),
-		execution.Documents,
-	)
-	return normalizeStepExecutionSources(execution), nil
-}
-
 // sourceIDPrefix 为某个 step/todo 生成局部 source ID 前缀，降低并行 researcher 合并时的
 // ID 冲突概率。
 func sourceIDPrefix(stepID string) string {
@@ -378,20 +228,6 @@ func sourceIDPrefix(stepID string) string {
 		return "src"
 	}
 	return stepID + "_src"
-}
-
-// buildResearchers 构建 legacy step 流程的固定三角色 researcher。
-func buildResearchers(ctx context.Context, cfg RunnerConfig, researchTools ...tool.BaseTool) ([]Researcher, error) {
-	roles := DefaultResearcherRoles()
-	researchers := make([]Researcher, 0, len(roles))
-	for i, role := range roles {
-		researcher, err := NewAgentResearcher(ctx, role, focusForIndex(i), cfg.Model, researchTools...)
-		if err != nil {
-			return nil, fmt.Errorf("new %s: %w", role, err)
-		}
-		researchers = append(researchers, researcher)
-	}
-	return researchers, nil
 }
 
 // buildTodoResearchers 根据 TodoDispatcher 产出的 job 构建 researcher。
@@ -405,77 +241,4 @@ func buildTodoResearchers(ctx context.Context, cfg RunnerConfig, jobs []TodoRese
 		researchers = append(researchers, researcher)
 	}
 	return researchers, nil
-}
-
-// appendResearchStep 把完成的 legacy StepExecution 追加到 ADK session。
-func appendResearchStep(ctx context.Context, step StepExecution) {
-	steps := getResearchSteps(ctx)
-	steps = append(steps, step)
-	adk.AddSessionValue(ctx, ResearchExecutedStepsSessionKey, steps)
-}
-
-// getResearchSteps 从 ADK session 中读取已完成 step，并返回副本避免调用方修改 session 内部值。
-func getResearchSteps(ctx context.Context) []StepExecution {
-	raw, ok := adk.GetSessionValue(ctx, ResearchExecutedStepsSessionKey)
-	if !ok {
-		return nil
-	}
-	steps, ok := raw.([]StepExecution)
-	if !ok {
-		return nil
-	}
-	out := make([]StepExecution, len(steps))
-	copy(out, steps)
-	return out
-}
-
-// formatUserInput 将 ADK session 中可能出现的多种 user input 表示统一成字符串。
-func formatUserInput(raw any) string {
-	switch v := raw.(type) {
-	case string:
-		return v
-	case []adk.Message:
-		parts := make([]string, 0, len(v))
-		for _, msg := range v {
-			if msg == nil {
-				continue
-			}
-			if content := strings.TrimSpace(msg.Content); content != "" {
-				parts = append(parts, content)
-			}
-		}
-		return strings.Join(parts, "\n")
-	case adk.Message:
-		if v == nil {
-			return ""
-		}
-		return v.Content
-	default:
-		return fmt.Sprint(v)
-	}
-}
-
-// decodeResearchStep 解析 plan.FirstStep 的 JSON。
-//
-// 为兼容早期 string step，如果 JSON 解析失败，会退化为一个最小 ResearchStep。
-func decodeResearchStep(stepContent string) (ResearchStep, error) {
-	stepContent = strings.TrimSpace(stepContent)
-	if stepContent == "" {
-		return ResearchStep{}, fmt.Errorf("plan first step is empty")
-	}
-
-	var step ResearchStep
-	if err := json.Unmarshal([]byte(stepContent), &step); err == nil {
-		if strings.TrimSpace(step.Question) == "" {
-			step.Question = step.Title
-		}
-		return step, nil
-	}
-
-	return ResearchStep{
-		ID:              "step_1",
-		Title:           stepContent,
-		Question:        stepContent,
-		SuccessCriteria: []string{"Answer the step with cited evidence."},
-	}, nil
 }

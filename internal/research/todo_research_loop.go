@@ -17,8 +17,8 @@ type TodoResearchLoopInput struct {
 	Todo ResearchTodo
 	// DependencyExecutions 是当前 todo 的已完成依赖。
 	DependencyExecutions []TodoExecution
-	// MaxIterations 是最多深挖轮数，<=0 时按 1 轮处理。
-	MaxIterations int
+	// MaxAttempts 是最多深挖轮数，<=0 时按 1 轮处理。
+	MaxAttempts int
 	// ExecuteStep 是每一轮真正执行 researcher+synthesis 的函数。
 	ExecuteStep StepExecuteFunc
 }
@@ -31,17 +31,17 @@ func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExe
 	if in.ExecuteStep == nil {
 		return StepExecution{}, fmt.Errorf("execute step function is required")
 	}
-	maxIterations := in.MaxIterations
-	if maxIterations <= 0 {
-		maxIterations = 1
+	maxAttempts := in.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 1
 	}
 
 	baseSteps := dependencyExecutionsAsSteps(in.DependencyExecutions)
-	attempts := make([]StepExecution, 0, maxIterations)
+	attempts := make([]StepExecution, 0, maxAttempts)
 	step := todoToResearchStep(in.Todo)
 	var last StepExecution
 
-	for attempt := 1; attempt <= maxIterations; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return StepExecution{}, err
 		}

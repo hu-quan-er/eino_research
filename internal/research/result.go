@@ -4,8 +4,7 @@ import "github.com/hu-quan-er/eino_research/internal/search"
 
 // ResearchResult 是一次 research run 的完整结构化输出。
 //
-// 新的 todo-plan 流程会填充 Plan、TodoExecutions、SectionExecutions、Sources 和
-// Documents；LegacyPlan/ExecutedSteps 用于兼容早期 planexecute 流程和相关测试。
+// todo-plan 流程会填充 Plan、TodoExecutions、SectionExecutions、Sources 和 Documents。
 type ResearchResult struct {
 	// Question 是用户原始研究问题，会贯穿 planner、executor 和最终报告。
 	Question string `json:"question"`
@@ -25,11 +24,6 @@ type ResearchResult struct {
 	Metadata Metadata `json:"metadata"`
 	// Error 在 run 失败时记录阶段和错误信息；成功时为空。
 	Error *RunError `json:"error,omitempty"`
-
-	// LegacyPlan 保留早期 step-based planexecute 流程中的 plan。
-	LegacyPlan *ResearchPlan `json:"legacy_plan,omitempty"`
-	// ExecutedSteps 保留早期 step-based planexecute 流程中的 step 结果。
-	ExecutedSteps []StepExecution `json:"executed_steps,omitempty"`
 }
 
 // Answer 是最终回答的用户可见摘要。
@@ -49,8 +43,7 @@ type Answer struct {
 
 // StepExecution 表示一个 ResearchStep 被多个 researcher 执行并综合后的结果。
 //
-// 它是 legacy step 流程和 todo 内部执行循环之间的桥接结构，后续会被转换为
-// TodoExecution。
+// 它是 todo 内部 bounded loop 的中间结构，后续会被转换为 TodoExecution。
 type StepExecution struct {
 	// Step 是本轮执行的研究步骤或由 todo 转换来的步骤。
 	Step ResearchStep `json:"step"`
@@ -159,8 +152,8 @@ type Metadata struct {
 	Model string `json:"model"`
 	// SearchProvider 是本次运行使用的搜索 provider 名称。
 	SearchProvider string `json:"search_provider"`
-	// MaxIterations 是外层 planexecute 或 runner 配置的最大迭代数。
-	MaxIterations int `json:"max_iterations"`
+	// MaxTodoResearchIterations 是单个 todo 内 gap retry 的最大轮数。
+	MaxTodoResearchIterations int `json:"max_todo_research_iterations"`
 	// StartedAt 是 run 开始时间，使用 RFC3339 字符串。
 	StartedAt string `json:"started_at"`
 	// CompletedAt 是 run 结束时间，使用 RFC3339 字符串。

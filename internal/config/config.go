@@ -87,17 +87,12 @@ type GoogleSearchConfig struct {
 	CSEID string `yaml:"cse_id"`
 }
 
-// ResearchConfig 控制外层 plan/execute 循环，以及 todo 内部的 bounded research
-// 深挖循环。
+// ResearchConfig 控制 todo 派发和 todo 内部 bounded research 深挖循环。
 type ResearchConfig struct {
-	// MaxIterations 是 legacy planexecute 外层最大迭代次数。
-	MaxIterations int `yaml:"max_iterations"`
 	// MaxResearchersPerTodo 限制每个 todo 派发的 researcher 数量。
 	MaxResearchersPerTodo int `yaml:"max_researchers_per_todo"`
 	// MaxTodoResearchIterations 限制单个 todo 因 gap retry 的最大深挖轮数。
 	MaxTodoResearchIterations int `yaml:"max_todo_research_iterations"`
-	// ResearcherRoles 保留为配置表达，当前主路径由 RuleBasedTodoDispatcher 决定具体角色。
-	ResearcherRoles []string `yaml:"researcher_roles"`
 }
 
 // OutputConfig 控制最终 CLI 输出格式和进度日志。
@@ -129,8 +124,8 @@ type Overrides struct {
 	Provider string
 	// OutputFormat 覆盖 output.format。
 	OutputFormat string
-	// MaxIterations 覆盖 research.max_iterations。
-	MaxIterations *int
+	// MaxTodoResearchIterations 覆盖 research.max_todo_research_iterations。
+	MaxTodoResearchIterations *int
 	// Verbose 覆盖 output.verbose。
 	Verbose *bool
 }
@@ -148,14 +143,8 @@ func Defaults() Config {
 			ResultsPerSearch:   5,
 		},
 		Research: ResearchConfig{
-			MaxIterations:             5,
 			MaxResearchersPerTodo:     3,
 			MaxTodoResearchIterations: 2,
-			ResearcherRoles: []string{
-				"background_researcher",
-				"evidence_researcher",
-				"counterpoint_researcher",
-			},
 		},
 		Output: OutputConfig{
 			Format: "markdown",
@@ -267,8 +256,8 @@ func applyOverrides(cfg *Config, o Overrides) {
 	if o.OutputFormat != "" {
 		cfg.Output.Format = o.OutputFormat
 	}
-	if o.MaxIterations != nil {
-		cfg.Research.MaxIterations = *o.MaxIterations
+	if o.MaxTodoResearchIterations != nil {
+		cfg.Research.MaxTodoResearchIterations = *o.MaxTodoResearchIterations
 	}
 	if o.Verbose != nil {
 		cfg.Output.Verbose = *o.Verbose
@@ -296,9 +285,6 @@ func (c Config) Validate() error {
 	}
 	if c.Output.Format != "markdown" && c.Output.Format != "json" {
 		return fmt.Errorf("unsupported output format %q", c.Output.Format)
-	}
-	if c.Research.MaxIterations <= 0 {
-		return errors.New("research.max_iterations must be positive")
 	}
 	if c.Research.MaxResearchersPerTodo <= 0 {
 		return errors.New("research.max_researchers_per_todo must be positive")

@@ -172,7 +172,7 @@ func TestRunHelpReturnsZeroAndPrintsUsage(t *testing.T) {
 	if !strings.Contains(stderr, "-config string") {
 		t.Fatalf("stderr = %q, want flag defaults", stderr)
 	}
-	for _, flag := range []string{"-yes", "-plan-only", "-plan-json", "-max-parallel"} {
+	for _, flag := range []string{"-yes", "-plan-only", "-plan-json", "-max-parallel", "-max-todo-research-iterations"} {
 		if !strings.Contains(stderr, flag) {
 			t.Fatalf("stderr = %q, want %s flag", stderr, flag)
 		}

@@ -21,7 +21,7 @@ func TestRunTodoResearchLoopRepeatsWhenGapsRemain(t *testing.T) {
 		Plan:                 plan,
 		Todo:                 todo,
 		DependencyExecutions: []TodoExecution{dependency},
-		MaxIterations:        2,
+		MaxAttempts:          2,
 		ExecuteStep: func(_ context.Context, in StepExecutionInput) (StepExecution, error) {
 			calls++
 			if calls == 1 {
@@ -69,15 +69,15 @@ func TestRunTodoResearchLoopRepeatsWhenGapsRemain(t *testing.T) {
 	}
 }
 
-func TestRunTodoResearchLoopStopsAtMaxIterationsWithGaps(t *testing.T) {
+func TestRunTodoResearchLoopStopsAtMaxAttemptsWithGaps(t *testing.T) {
 	plan := validTodoPlan()
 	todo := plan.Todos[1]
 	calls := 0
 
 	out, err := runTodoResearchLoop(context.Background(), TodoResearchLoopInput{
-		Plan:          plan,
-		Todo:          todo,
-		MaxIterations: 2,
+		Plan:        plan,
+		Todo:        todo,
+		MaxAttempts: 2,
 		ExecuteStep: func(_ context.Context, in StepExecutionInput) (StepExecution, error) {
 			calls++
 			return StepExecution{
@@ -103,9 +103,9 @@ func TestRunTodoResearchLoopStopsWhenFirstAttemptSatisfiesTodo(t *testing.T) {
 	calls := 0
 
 	_, err := runTodoResearchLoop(context.Background(), TodoResearchLoopInput{
-		Plan:          plan,
-		Todo:          todo,
-		MaxIterations: 3,
+		Plan:        plan,
+		Todo:        todo,
+		MaxAttempts: 3,
 		ExecuteStep: func(_ context.Context, in StepExecutionInput) (StepExecution, error) {
 			calls++
 			return StepExecution{

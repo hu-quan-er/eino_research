@@ -44,7 +44,7 @@ func run(args []string) int {
 	configPath := fs.String("config", "research.yaml", "path to config file")
 	jsonOutput := fs.Bool("json", false, "output JSON")
 	provider := fs.String("provider", "", "search provider: mock or google")
-	maxIterations := fs.Int("max-iterations", 0, "maximum plan-execute-replan iterations")
+	maxTodoResearchIterations := fs.Int("max-todo-research-iterations", 0, "maximum gap retry iterations per todo")
 	maxParallel := fs.Int("max-parallel", 0, "maximum runnable todos to execute concurrently")
 	yes := fs.Bool("yes", false, "skip confirmation and execute the generated plan")
 	planOnly := fs.Bool("plan-only", false, "generate and print the plan without executing")
@@ -72,9 +72,9 @@ func run(args []string) int {
 		format = "json"
 	}
 
-	var maxIterationsOverride *int
-	if flagProvided(fs, "max-iterations") {
-		maxIterationsOverride = maxIterations
+	var maxTodoResearchIterationsOverride *int
+	if flagProvided(fs, "max-todo-research-iterations") {
+		maxTodoResearchIterationsOverride = maxTodoResearchIterations
 	}
 
 	var verboseOverride *bool
@@ -86,10 +86,10 @@ func run(args []string) int {
 		Path:     *configPath,
 		Explicit: flagProvided(fs, "config"),
 		Overrides: appconfig.Overrides{
-			Provider:      *provider,
-			OutputFormat:  format,
-			MaxIterations: maxIterationsOverride,
-			Verbose:       verboseOverride,
+			Provider:                  *provider,
+			OutputFormat:              format,
+			MaxTodoResearchIterations: maxTodoResearchIterationsOverride,
+			Verbose:                   verboseOverride,
 		},
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func run(args []string) int {
 	}
 
 	if cfg.Output.Verbose {
-		fmt.Fprintf(os.Stderr, "running research with provider=%s max_iterations=%d timeout=%s\n", searchName, cfg.Research.MaxIterations, cfg.Model.Timeout.Round(time.Second))
+		fmt.Fprintf(os.Stderr, "running research with provider=%s max_todo_research_iterations=%d timeout=%s\n", searchName, cfg.Research.MaxTodoResearchIterations, cfg.Model.Timeout.Round(time.Second))
 	}
 
 	runner, err := research.NewRunner(research.RunnerConfig{
@@ -143,7 +143,6 @@ func run(args []string) int {
 		SearchProvider:            sp,
 		ModelName:                 cfg.Model.Model,
 		SearchProviderName:        searchName,
-		MaxIterations:             cfg.Research.MaxIterations,
 		MaxSearchesPerStep:        cfg.Search.MaxSearchesPerStep,
 		ResultsPerSearch:          cfg.Search.ResultsPerSearch,
 		MaxParallelTodos:          *maxParallel,

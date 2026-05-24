@@ -23,9 +23,6 @@ func TestLoadDefaultsWhenConfigMissing(t *testing.T) {
 	if cfg.Search.Provider != "mock" {
 		t.Fatalf("Search.Provider = %q, want mock", cfg.Search.Provider)
 	}
-	if cfg.Research.MaxIterations != 5 {
-		t.Fatalf("MaxIterations = %d, want 5", cfg.Research.MaxIterations)
-	}
 	if cfg.Search.MaxSearchesPerStep != 6 {
 		t.Fatalf("MaxSearchesPerStep = %d, want 6", cfg.Search.MaxSearchesPerStep)
 	}
@@ -57,7 +54,6 @@ search:
   max_searches_per_step: 4
   results_per_search: 3
 research:
-  max_iterations: 7
   max_researchers_per_todo: 4
   max_todo_research_iterations: 3
 output:
@@ -77,10 +73,10 @@ output:
 	cfg, err := Load(LoadOptions{
 		Path: path,
 		Overrides: Overrides{
-			Provider:      "mock",
-			OutputFormat:  "markdown",
-			MaxIterations: intPtr(9),
-			Verbose:       boolPtr(false),
+			Provider:                  "mock",
+			OutputFormat:              "markdown",
+			MaxTodoResearchIterations: intPtr(9),
+			Verbose:                   boolPtr(false),
 		},
 	})
 	if err != nil {
@@ -99,14 +95,11 @@ output:
 	if cfg.Search.Provider != "mock" {
 		t.Fatalf("Search.Provider = %q, want mock", cfg.Search.Provider)
 	}
-	if cfg.Research.MaxIterations != 9 {
-		t.Fatalf("MaxIterations = %d, want 9", cfg.Research.MaxIterations)
-	}
 	if cfg.Research.MaxResearchersPerTodo != 4 {
 		t.Fatalf("MaxResearchersPerTodo = %d, want 4", cfg.Research.MaxResearchersPerTodo)
 	}
-	if cfg.Research.MaxTodoResearchIterations != 3 {
-		t.Fatalf("MaxTodoResearchIterations = %d, want 3", cfg.Research.MaxTodoResearchIterations)
+	if cfg.Research.MaxTodoResearchIterations != 9 {
+		t.Fatalf("MaxTodoResearchIterations = %d, want 9", cfg.Research.MaxTodoResearchIterations)
 	}
 	if cfg.Output.Format != "markdown" {
 		t.Fatalf("Output.Format = %q, want markdown", cfg.Output.Format)
@@ -178,17 +171,17 @@ func TestLoadRejectsNonPositiveTimeout(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsNonPositiveMaxIterationsOverride(t *testing.T) {
+func TestLoadRejectsNonPositiveMaxTodoResearchIterationsOverride(t *testing.T) {
 	for _, value := range []int{0, -1} {
 		t.Run("value "+strconv.Itoa(value), func(t *testing.T) {
 			_, err := Load(LoadOptions{
 				Path: filepath.Join(t.TempDir(), "missing.yaml"),
 				Overrides: Overrides{
-					MaxIterations: intPtr(value),
+					MaxTodoResearchIterations: intPtr(value),
 				},
 			})
 			if err == nil {
-				t.Fatalf("Load returned nil error for MaxIterations override %d, want error", value)
+				t.Fatalf("Load returned nil error for MaxTodoResearchIterations override %d, want error", value)
 			}
 		})
 	}

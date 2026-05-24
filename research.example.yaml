@@ -14,11 +14,8 @@ search:
   results_per_search: 5
 
 research:
-  max_iterations: 5
-  researcher_roles:
-    - background_researcher
-    - evidence_researcher
-    - counterpoint_researcher
+  max_researchers_per_todo: 3
+  max_todo_research_iterations: 2
 
 output:
   format: markdown
