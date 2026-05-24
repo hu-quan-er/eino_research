@@ -19,19 +19,32 @@ import (
 // TodoExecutor/TodoReplanner/TodoDispatcher 主要用于测试注入和后续策略替换；生产路径在
 // 未传入时会使用 Runner 的默认实现。
 type RunnerConfig struct {
-	Model                     model.ToolCallingChatModel
-	SearchProvider            search.Provider
-	ModelName                 string
-	SearchProviderName        string
-	MaxIterations             int
-	MaxSearchesPerStep        int
-	ResultsPerSearch          int
-	MaxParallelTodos          int
-	MaxResearchersPerTodo     int
+	// Model 是所有 planner/researcher/synthesizer 共享的 tool-calling chat model。
+	Model model.ToolCallingChatModel
+	// SearchProvider 是 web_search 工具实际调用的搜索 provider。
+	SearchProvider search.Provider
+	// ModelName 记录到 Metadata 中，便于结果审计。
+	ModelName string
+	// SearchProviderName 记录到 Metadata 中，便于结果审计。
+	SearchProviderName string
+	// MaxIterations 是 legacy planexecute 外层最大迭代次数。
+	MaxIterations int
+	// MaxSearchesPerStep 限制每个 step/todo 内 web_search 调用次数。
+	MaxSearchesPerStep int
+	// ResultsPerSearch 限制每次 web_search 返回结果数。
+	ResultsPerSearch int
+	// MaxParallelTodos 限制 TodoScheduler 同时运行的 todo 数。
+	MaxParallelTodos int
+	// MaxResearchersPerTodo 限制单个 todo 派生的 researcher 数。
+	MaxResearchersPerTodo int
+	// MaxTodoResearchIterations 限制单个 todo 因 gap retry 的最大轮数。
 	MaxTodoResearchIterations int
-	TodoExecutor              TodoExecutor
-	TodoReplanner             TodoReplanner
-	TodoDispatcher            TodoDispatcher
+	// TodoExecutor 可替换默认 todo 执行器，主要用于测试或策略注入。
+	TodoExecutor TodoExecutor
+	// TodoReplanner 可在 todo 失败后返回 plan patch。
+	TodoReplanner TodoReplanner
+	// TodoDispatcher 可替换默认规则派发器。
+	TodoDispatcher TodoDispatcher
 }
 
 // Runner 是 research workflow 的门面。
@@ -83,9 +96,11 @@ func (r *Runner) Plan(ctx context.Context, question string) (ResearchTodoPlan, e
 		return ResearchTodoPlan{}, fmt.Errorf("question is required")
 	}
 
+	// 首选 tool-call，因为 schema 约束能显著减少 planner 输出格式漂移。
 	if plan, previousOutput, previousErr := r.planWithToolCall(ctx, question); previousErr == nil {
 		return plan, nil
 	} else if strings.TrimSpace(previousOutput) != "" {
+		// tool-call 返回了 arguments 但未通过校验时，把原始 arguments 和错误反馈给 repair prompt。
 		if err := ctx.Err(); err != nil {
 			return ResearchTodoPlan{}, err
 		}
@@ -95,6 +110,7 @@ func (r *Runner) Plan(ctx context.Context, question string) (ResearchTodoPlan, e
 		return ResearchTodoPlan{}, err
 	}
 
+	// 如果 tool-call 不可用或模型完全没调用工具，则退回纯文本 JSON repair 路径。
 	return r.planWithTextRepair(ctx, question, "", nil)
 }
 
@@ -144,6 +160,7 @@ func (r *Runner) planWithTextRepair(ctx context.Context, question, previousOutpu
 		if err == nil {
 			return plan, nil
 		}
+		// 保存本轮错误，下一轮 prompt 会要求模型针对该错误修复输出。
 		lastErr = err
 	}
 
@@ -215,6 +232,7 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 	if executor == nil {
 		executor = r.executeTodo
 	}
+	// Scheduler 只负责依赖图调度，具体 todo 内部如何派发 researcher 由 executor 决定。
 	scheduler, err := NewTodoScheduler(TodoSchedulerConfig{
 		MaxParallel: r.cfg.MaxParallelTodos,
 		Executor:    executor,
@@ -231,6 +249,7 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 		return result, err
 	}
 	result.TodoExecutions = todoExecutions
+	// 执行完成后再按原 plan 顺序重组 section，避免并发完成顺序影响最终报告结构。
 	result.SectionExecutions = groupTodoExecutionsBySection(plan, todoExecutions)
 	result.Sources = collectTodoExecutionSources(todoExecutions)
 	result.Documents = collectTodoExecutionDocuments(todoExecutions)
@@ -370,6 +389,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	if dispatcher == nil {
 		dispatcher = RuleBasedTodoDispatcher{MaxResearchers: r.cfg.MaxResearchersPerTodo}
 	}
+	// 派发层把一个 todo 拆成多个角色化 researcher job，但仍共享同一组工具预算。
 	jobs, err := dispatcher.Dispatch(ctx, TodoDispatchInput{
 		Plan:                 in.Plan,
 		Todo:                 in.Todo,
@@ -394,6 +414,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	if err != nil {
 		return TodoExecution{}, fmt.Errorf("new web search tool: %w", err)
 	}
+	// web_fetch 成功读取的页面先记录在 store 中，step 执行结束后统一转成 SourceDocument。
 	fetchedPages := NewFetchedPageStore()
 	fetchTool, err := NewWebFetchTool(HTTPPageFetcher{}, FetchLimits{
 		MaxFetchesPerStep: maxSearches,
@@ -411,6 +432,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 
 	step := todoToResearchStep(in.Todo)
 	stepExecutor := NewParallelStepExecutor(researchers, NewAgentSynthesizer(r.cfg.Model))
+	// bounded loop 会在结果存在确定性 gap 时把上一轮执行结果作为 prior context 继续尝试。
 	execution, err := runTodoResearchLoop(ctx, TodoResearchLoopInput{
 		Plan:                 in.Plan,
 		Todo:                 in.Todo,
@@ -424,6 +446,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 			if err != nil {
 				return StepExecution{}, err
 			}
+			// fetched 正文比搜索 snippet 更适合做 evidence quote，因此作为 primary document 合并。
 			execution.Documents = mergeSourceDocuments(
 				buildFetchedPageDocuments(fetchedPages.Pages(), execution.Sources, defaultSourceChunkChars),
 				execution.Documents,

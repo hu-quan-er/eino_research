@@ -8,8 +8,11 @@ import (
 
 // TodoResearchRole 描述一个 todo 内部派生出的研究角色。
 type TodoResearchRole struct {
-	ID    string
-	Name  string
+	// ID 是角色稳定标识，会作为 AgentResearcher 的 role/name。
+	ID string
+	// Name 是面向人类阅读的角色名称。
+	Name string
+	// Focus 是该角色在 prompt 中的研究重点。
 	Focus string
 }
 
@@ -17,34 +20,50 @@ type TodoResearchRole struct {
 //
 // 当前主要使用 MaxSearches/MaxFetches，MaxTokens 预留给后续模型调用预算控制。
 type TodoResearchBudget struct {
+	// MaxSearches 是该 todo 内允许的最大搜索次数。
 	MaxSearches int
-	MaxFetches  int
-	MaxTokens   int
+	// MaxFetches 是该 todo 内允许的最大页面读取次数。
+	MaxFetches int
+	// MaxTokens 预留给未来 token 预算控制。
+	MaxTokens int
 }
 
 // TodoResearchContext 是 researcher job 需要理解当前 todo 的上下文。
 type TodoResearchContext struct {
-	Objective            string
-	Todo                 ResearchTodo
+	// Objective 是全局研究目标。
+	Objective string
+	// Todo 是当前 job 所属的 todo。
+	Todo ResearchTodo
+	// DependencyExecutions 是已完成依赖的结果。
 	DependencyExecutions []TodoExecution
 }
 
 // TodoResearchJob 是 TodoDispatcher 的输出，也是 buildTodoResearchers 的输入。
 type TodoResearchJob struct {
-	TodoID  string
-	RoleID  string
-	Name    string
-	Focus   string
+	// TodoID 是当前 job 所属 todo 的 id。
+	TodoID string
+	// RoleID 是 researcher 的稳定角色 ID。
+	RoleID string
+	// Name 是人类可读角色名。
+	Name string
+	// Focus 是传给 researcher 的研究方向。
+	Focus string
+	// Context 是 researcher 需要理解当前 todo 的上下文。
 	Context TodoResearchContext
-	Budget  TodoResearchBudget
+	// Budget 是该 job 共享的 todo 级工具预算。
+	Budget TodoResearchBudget
 }
 
 // TodoDispatchInput 是派发层决策 researcher jobs 的输入。
 type TodoDispatchInput struct {
-	Plan                 ResearchTodoPlan
-	Todo                 ResearchTodo
+	// Plan 是完整 todo plan，派发规则会读取 objective 和 section 信息。
+	Plan ResearchTodoPlan
+	// Todo 是当前待派发的 runnable todo。
+	Todo ResearchTodo
+	// DependencyExecutions 是当前 todo 已完成依赖的结果。
 	DependencyExecutions []TodoExecution
-	Budget               TodoResearchBudget
+	// Budget 是执行器分配给当前 todo 的工具预算。
+	Budget TodoResearchBudget
 }
 
 // TodoDispatcher 把一个 runnable todo 转换为一组角色化 researcher jobs。
@@ -56,6 +75,7 @@ type TodoDispatcher interface {
 //
 // 这样 planner 只需关注 todo 拆解，角色 fan-out 由代码控制，便于测试、限流和兜底。
 type RuleBasedTodoDispatcher struct {
+	// MaxResearchers 是最多派发的角色数量；<=0 表示不截断。
 	MaxResearchers int
 }
 

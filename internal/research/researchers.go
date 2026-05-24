@@ -19,8 +19,11 @@ import (
 // 每个实例绑定一个角色和 focus，执行时会通过 web_search/web_fetch 收集资料，并要求模型
 // 返回 ResearcherResult JSON。
 type AgentResearcher struct {
-	role  string
+	// role 是该 agent 的稳定角色 ID。
+	role string
+	// focus 是该 agent 的研究侧重点，会写入 prompt。
 	focus string
+	// agent 是底层 Eino ChatModelAgent。
 	agent adk.Agent
 }
 
@@ -158,6 +161,7 @@ Return only a JSON ResearcherResult object.`, in.Question, stepPrompt, string(ex
 
 // AgentSynthesizer 使用模型把多个 researcher 输出合并为 StepExecution。
 type AgentSynthesizer struct {
+	// model 是用于综合 researcher 输出的 chat model。
 	model model.BaseChatModel
 }
 
@@ -195,6 +199,7 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	normalizedResults, researcherSources := normalizeResearcherSources(in.Results)
 	var out StepExecution
 	if err := json.Unmarshal([]byte(content), &out); err != nil {
+		// synthesizer 偶发返回非 JSON 时，保留原文作为 summary，并继续向上游传递 researcher 证据。
 		return StepExecution{
 			Step:              in.Step,
 			ResearcherResults: normalizedResults,
@@ -206,10 +211,12 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 		out.Step = in.Step
 	}
 	if len(out.ResearcherResults) == 0 {
+		// 模型可能只返回 summary/sources；此时使用原始 researcher results 补齐可审计细节。
 		out.ResearcherResults = normalizedResults
 	} else {
 		out.ResearcherResults, _ = normalizeResearcherSources(out.ResearcherResults)
 	}
+	// researcherSources 是原始证据主来源，synthesizer 额外返回的 sources 只作为补充。
 	out.Sources = mergeSources(researcherSources, out.Sources)
 
 	return out, nil
@@ -257,12 +264,14 @@ func normalizeResearcherSources(results []ResearcherResult) ([]ResearcherResult,
 			oldID := source.ID
 			id, ok := urlToID[source.URL]
 			if !ok {
+				// 同一个 URL 第一次出现时分配全局唯一 ID。
 				id = allocateSourceID(source.ID, usedID, &nextID)
 				source.ID = id
 				urlToID[source.URL] = id
 				usedID[id] = struct{}{}
 				allSources = append(allSources, source)
 			} else {
+				// 重复 URL 复用第一次分配的 ID，确保 finding 引用同一来源。
 				source.ID = id
 			}
 			if strings.TrimSpace(oldID) != "" {
@@ -272,6 +281,7 @@ func normalizeResearcherSources(results []ResearcherResult) ([]ResearcherResult,
 		}
 
 		result.Sources = sourceOut
+		// source id 被重写后，finding/evidence_refs 也必须同步重写，否则 citation 会悬空。
 		result.Findings = rewriteFindingsSourceIDs(result.Findings, idMap)
 		normalized[i] = result
 	}

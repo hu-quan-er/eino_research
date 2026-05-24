@@ -11,6 +11,7 @@ import (
 // 新主流程已经切到 ResearchTodoPlan，但保留该结构用于兼容 Eino planexecute agent、
 // 回归测试，以及后续可能的 legacy migration。
 type ResearchPlan struct {
+	// Steps 是 legacy planexecute 流程按顺序执行的 step 列表。
 	Steps []ResearchStep `json:"steps"`
 }
 
@@ -19,11 +20,17 @@ type ResearchPlan struct {
 // todoToResearchStep 会把 ResearchTodo 转成该结构，从而复用 ParallelStepExecutor、
 // AgentResearcher 和 AgentSynthesizer。
 type ResearchStep struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`
-	Question        string   `json:"question"`
-	SearchQueries   []string `json:"search_queries"`
-	ResearchAxes    []string `json:"research_axes,omitempty"`
+	// ID 是 step 的稳定引用 ID。
+	ID string `json:"id"`
+	// Title 是 step 的简短标题。
+	Title string `json:"title"`
+	// Question 是该 step 要回答的具体问题。
+	Question string `json:"question"`
+	// SearchQueries 是 researcher 的初始检索 query。
+	SearchQueries []string `json:"search_queries"`
+	// ResearchAxes 是建议 researcher 覆盖的分析角度。
+	ResearchAxes []string `json:"research_axes,omitempty"`
+	// SuccessCriteria 是判断 step 是否完成的标准。
 	SuccessCriteria []string `json:"success_criteria"`
 }
 

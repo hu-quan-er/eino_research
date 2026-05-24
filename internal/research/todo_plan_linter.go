@@ -14,15 +14,21 @@ const (
 //
 // Severity 当前主要使用 error；保留 warning 是为了后续允许非阻断式质量提示。
 type PlanIssue struct {
+	// Severity 表示问题级别，目前 error 会阻断 planner 输出进入执行层。
 	Severity string
-	Code     string
-	Path     string
-	Message  string
-	Hint     string
+	// Code 是稳定问题编码，便于测试断言和后续机器处理。
+	Code string
+	// Path 指向出现问题的 plan 字段路径。
+	Path string
+	// Message 是面向开发者和 repair prompt 的问题描述。
+	Message string
+	// Hint 是建议模型或开发者如何修复该问题。
+	Hint string
 }
 
 // PlanLintError 把多个 PlanIssue 聚合成 error，供 planner repair prompt 使用。
 type PlanLintError struct {
+	// Issues 是所有阻断执行的 lint 问题。
 	Issues []PlanIssue
 }
 

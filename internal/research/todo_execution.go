@@ -25,20 +25,32 @@ const (
 // Findings 是从 ResearcherResults 聚合并补齐 evidence_refs 后的扁平列表，方便最终报告
 // 直接按 todo 展示证据。
 type TodoExecution struct {
-	Todo              ResearchTodo       `json:"todo"`
-	Status            TodoStatus         `json:"status"`
+	// Todo 是本次执行对应的原始任务定义。
+	Todo ResearchTodo `json:"todo"`
+	// Status 是调度器记录的 todo 执行状态。
+	Status TodoStatus `json:"status"`
+	// ResearcherResults 是该 todo 内部所有 researcher 的原始输出。
 	ResearcherResults []ResearcherResult `json:"researcher_results"`
-	Summary           string             `json:"summary"`
-	Findings          []Finding          `json:"findings,omitempty"`
-	Gaps              []string           `json:"gaps,omitempty"`
-	Sources           []search.Source    `json:"sources"`
-	Documents         []SourceDocument   `json:"documents,omitempty"`
-	Error             string             `json:"error,omitempty"`
+	// Summary 是 synthesizer 对 todo 的综合摘要。
+	Summary string `json:"summary"`
+	// Findings 是聚合后的扁平 finding 列表，报告层优先读取它。
+	Findings []Finding `json:"findings,omitempty"`
+	// Gaps 记录 todo 仍未解决的问题或证据缺口。
+	Gaps []string `json:"gaps,omitempty"`
+	// Sources 是该 todo 使用或发现的来源。
+	Sources []search.Source `json:"sources"`
+	// Documents 是该 todo 生成的可引用正文切片。
+	Documents []SourceDocument `json:"documents,omitempty"`
+	// Error 是执行失败或 blocked/skipped 的可读原因。
+	Error string `json:"error,omitempty"`
 }
 
 // SectionExecution 是报告层的分组结果，按原始 plan.sections 顺序聚合对应 todo。
 type SectionExecution struct {
+	// Section 是对应的 plan section。
 	Section ResearchSection `json:"section"`
-	Todos   []TodoExecution `json:"todos"`
-	Summary string          `json:"summary"`
+	// Todos 是该 section 下的 todo 执行结果。
+	Todos []TodoExecution `json:"todos"`
+	// Summary 是该 section 下 todo summaries 的合并文本。
+	Summary string `json:"summary"`
 }

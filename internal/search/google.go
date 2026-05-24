@@ -18,10 +18,14 @@ const (
 //
 // BaseURL 和 Client 可注入，方便测试时把请求导向 httptest server。
 type GoogleConfig struct {
-	APIKey  string
-	CSEID   string
+	// APIKey 是 Google Custom Search API key。
+	APIKey string
+	// CSEID 是 Google Custom Search Engine ID。
+	CSEID string
+	// BaseURL 是 API 地址，测试时可替换为 httptest server。
 	BaseURL string
-	Client  *http.Client
+	// Client 是 HTTP 客户端，未设置时使用 http.DefaultClient。
+	Client *http.Client
 }
 
 // GoogleProvider 基于 Google Custom Search JSON API 实现 Provider。

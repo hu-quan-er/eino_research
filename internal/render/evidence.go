@@ -49,9 +49,13 @@ func appendFindingsAndEvidence(sb *strings.Builder, result research.ResearchResu
 // evidenceIndex 是 Markdown 渲染阶段使用的查找表，用于把 source_id/chunk_id 快速映射回
 // source 元数据和 chunk 文本。
 type evidenceIndex struct {
-	sourceByID         map[string]search.Source
+	// sourceByID 用 source_id 查 source 元数据。
+	sourceByID map[string]search.Source
+	// documentBySourceID 用 source_id 查对应 document。
 	documentBySourceID map[string]research.SourceDocument
-	chunkByID          map[string]research.SourceChunk
+	// chunkByID 用 chunk_id 查具体文本片段。
+	chunkByID map[string]research.SourceChunk
+	// firstChunkBySource 是 source_id 到首个 chunk 的兜底映射。
 	firstChunkBySource map[string]research.SourceChunk
 }
 

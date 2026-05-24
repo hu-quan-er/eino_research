@@ -39,20 +39,29 @@ func (d Duration) MarshalYAML() (any, error) {
 // 调用方应该优先使用 Load 获取 Config，而不是直接构造它；Load 会统一处理默认值、
 // 配置文件、环境变量、命令行覆盖和最终校验。
 type Config struct {
-	Model    ModelConfig    `yaml:"model"`
-	Search   SearchConfig   `yaml:"search"`
+	// Model 配置 planner/researcher/synthesizer 共用的大模型。
+	Model ModelConfig `yaml:"model"`
+	// Search 配置搜索 provider 和单步检索预算。
+	Search SearchConfig `yaml:"search"`
+	// Research 配置 research 主循环、todo fan-out 和 retry 预算。
 	Research ResearchConfig `yaml:"research"`
-	Output   OutputConfig   `yaml:"output"`
+	// Output 配置 CLI 最终输出格式和日志开关。
+	Output OutputConfig `yaml:"output"`
 }
 
 // ModelConfig 描述 planner、researcher、synthesizer 共用的 OpenAI-compatible
 // chat model 配置。
 type ModelConfig struct {
-	Provider string        `yaml:"provider"`
-	APIKey   string        `yaml:"api_key"`
-	Model    string        `yaml:"model"`
-	BaseURL  string        `yaml:"base_url"`
-	Timeout  time.Duration `yaml:"-"`
+	// Provider 目前只支持 openai-compatible。
+	Provider string `yaml:"provider"`
+	// APIKey 是模型服务访问密钥，可由 OPENAI_API_KEY 覆盖。
+	APIKey string `yaml:"api_key"`
+	// Model 是模型名称，可由 OPENAI_MODEL 覆盖。
+	Model string `yaml:"model"`
+	// BaseURL 是 OpenAI-compatible API 地址，可由 OPENAI_BASE_URL 覆盖。
+	BaseURL string `yaml:"base_url"`
+	// Timeout 是模型请求超时时间，通过自定义 UnmarshalYAML 从 YAML 的 timeout 解析。
+	Timeout time.Duration `yaml:"-"`
 }
 
 // SearchConfig 描述搜索 provider 以及单个 step/todo 内的搜索预算。
@@ -60,31 +69,43 @@ type ModelConfig struct {
 // ResultsPerSearch 还要受具体 provider 限制，例如 Google Custom Search 单次最多
 // 允许 10 条结果。
 type SearchConfig struct {
-	Provider           string             `yaml:"provider"`
-	Google             GoogleSearchConfig `yaml:"google"`
-	MaxSearchesPerStep int                `yaml:"max_searches_per_step"`
-	ResultsPerSearch   int                `yaml:"results_per_search"`
+	// Provider 目前支持 mock 和 google。
+	Provider string `yaml:"provider"`
+	// Google 保存 Google Custom Search 的 provider 专属配置。
+	Google GoogleSearchConfig `yaml:"google"`
+	// MaxSearchesPerStep 限制单个 step/todo 内 web_search 可调用次数。
+	MaxSearchesPerStep int `yaml:"max_searches_per_step"`
+	// ResultsPerSearch 限制每次 web_search 返回的结果数量。
+	ResultsPerSearch int `yaml:"results_per_search"`
 }
 
 // GoogleSearchConfig 保存 Google Custom Search 需要的凭据。
 type GoogleSearchConfig struct {
+	// APIKey 是 Google Custom Search API key，可由 GOOGLE_API_KEY 覆盖。
 	APIKey string `yaml:"api_key"`
-	CSEID  string `yaml:"cse_id"`
+	// CSEID 是 Google Custom Search Engine ID，可由 GOOGLE_CSE_ID 覆盖。
+	CSEID string `yaml:"cse_id"`
 }
 
 // ResearchConfig 控制外层 plan/execute 循环，以及 todo 内部的 bounded research
 // 深挖循环。
 type ResearchConfig struct {
-	MaxIterations             int      `yaml:"max_iterations"`
-	MaxResearchersPerTodo     int      `yaml:"max_researchers_per_todo"`
-	MaxTodoResearchIterations int      `yaml:"max_todo_research_iterations"`
-	ResearcherRoles           []string `yaml:"researcher_roles"`
+	// MaxIterations 是 legacy planexecute 外层最大迭代次数。
+	MaxIterations int `yaml:"max_iterations"`
+	// MaxResearchersPerTodo 限制每个 todo 派发的 researcher 数量。
+	MaxResearchersPerTodo int `yaml:"max_researchers_per_todo"`
+	// MaxTodoResearchIterations 限制单个 todo 因 gap retry 的最大深挖轮数。
+	MaxTodoResearchIterations int `yaml:"max_todo_research_iterations"`
+	// ResearcherRoles 保留为配置表达，当前主路径由 RuleBasedTodoDispatcher 决定具体角色。
+	ResearcherRoles []string `yaml:"researcher_roles"`
 }
 
 // OutputConfig 控制最终 CLI 输出格式和进度日志。
 type OutputConfig struct {
-	Format  string `yaml:"format"`
-	Verbose bool   `yaml:"verbose"`
+	// Format 是输出格式，支持 markdown 和 json。
+	Format string `yaml:"format"`
+	// Verbose 控制是否向 stderr 输出进度信息。
+	Verbose bool `yaml:"verbose"`
 }
 
 // LoadOptions 描述 Load 如何处理配置文件和命令行覆盖。
@@ -92,8 +113,11 @@ type OutputConfig struct {
 // Explicit 为 true 时，配置文件缺失会被视为错误；否则默认配置文件不存在也允许继续，
 // 方便首次运行和测试场景。
 type LoadOptions struct {
-	Path      string
-	Explicit  bool
+	// Path 是配置文件路径。
+	Path string
+	// Explicit 表示该路径是否由用户显式传入。
+	Explicit bool
+	// Overrides 是命令行 flag 解析出的覆盖项。
 	Overrides Overrides
 }
 
@@ -101,10 +125,14 @@ type LoadOptions struct {
 //
 // 指针字段用于区分“没有提供该 flag”和“显式提供了零值”。
 type Overrides struct {
-	Provider      string
-	OutputFormat  string
+	// Provider 覆盖 search.provider。
+	Provider string
+	// OutputFormat 覆盖 output.format。
+	OutputFormat string
+	// MaxIterations 覆盖 research.max_iterations。
 	MaxIterations *int
-	Verbose       *bool
+	// Verbose 覆盖 output.verbose。
+	Verbose *bool
 }
 
 // Defaults 返回保守默认值，使本地测试和示例在没有外部搜索凭据时也能运行。
@@ -137,6 +165,7 @@ func Defaults() Config {
 
 // Load 读取配置文件，叠加环境变量与命令行覆盖，并在返回前执行完整校验。
 func Load(opts LoadOptions) (Config, error) {
+	// 先从代码默认值开始，保证缺省配置也能用于 mock provider 和单元测试。
 	cfg := Defaults()
 	if opts.Path != "" {
 		b, err := os.ReadFile(opts.Path)
@@ -148,7 +177,9 @@ func Load(opts LoadOptions) (Config, error) {
 			return Config{}, fmt.Errorf("parse config %s: %w", opts.Path, err)
 		}
 	}
+	// 环境变量用于注入密钥和部署环境差异，不需要写入配置文件。
 	applyEnv(&cfg)
+	// CLI flag 是用户本次运行的显式意图，优先级最高。
 	applyOverrides(&cfg, opts.Overrides)
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err

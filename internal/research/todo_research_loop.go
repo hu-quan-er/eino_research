@@ -11,11 +11,16 @@ type StepExecuteFunc func(context.Context, StepExecutionInput) (StepExecution, e
 
 // TodoResearchLoopInput 描述一个 todo 内部 bounded research loop 的输入。
 type TodoResearchLoopInput struct {
-	Plan                 ResearchTodoPlan
-	Todo                 ResearchTodo
+	// Plan 提供全局 objective 和 lint/gap 判断所需上下文。
+	Plan ResearchTodoPlan
+	// Todo 是当前需要深挖的任务。
+	Todo ResearchTodo
+	// DependencyExecutions 是当前 todo 的已完成依赖。
 	DependencyExecutions []TodoExecution
-	MaxIterations        int
-	ExecuteStep          StepExecuteFunc
+	// MaxIterations 是最多深挖轮数，<=0 时按 1 轮处理。
+	MaxIterations int
+	// ExecuteStep 是每一轮真正执行 researcher+synthesis 的函数。
+	ExecuteStep StepExecuteFunc
 }
 
 // runTodoResearchLoop 对单个 todo 做有限轮深挖。
@@ -41,6 +46,7 @@ func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExe
 			return StepExecution{}, err
 		}
 
+		// 每一轮都把“依赖结果 + 前几轮尝试结果”作为上下文，帮助模型针对 gap 补充研究。
 		executedSteps := append([]StepExecution{}, baseSteps...)
 		executedSteps = append(executedSteps, attempts...)
 		execution, err := in.ExecuteStep(ctx, StepExecutionInput{
@@ -59,6 +65,7 @@ func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExe
 			return execution, nil
 		}
 
+		// 保留 gap 信息进入下一轮；如果已经到上限，也会把最后一轮 gap 返回给调用方。
 		last.Gaps = mergeGapMessages(last.Gaps, gaps)
 		attempts = append(attempts, last)
 	}
@@ -82,6 +89,7 @@ func todoResearchGaps(plan ResearchTodoPlan, todo ResearchTodo, execution StepEx
 	if countResearchFindings(execution.ResearcherResults) == 0 && len(execution.Sources) == 0 {
 		gaps = append(gaps, "no findings or sources returned")
 	}
+	// 对证据型 todo，没有 sources 基本意味着最终报告无法给出可核验 citation。
 	if requiresSearchQueries(plan, todo) && len(execution.Sources) == 0 {
 		gaps = append(gaps, "evidence-oriented todo returned no sources")
 	}

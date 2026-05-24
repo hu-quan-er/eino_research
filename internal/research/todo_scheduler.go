@@ -9,8 +9,11 @@ import (
 
 // TodoExecutorInput 是调度器调用单个 todo executor 时传入的上下文。
 type TodoExecutorInput struct {
-	Plan                 ResearchTodoPlan
-	Todo                 ResearchTodo
+	// Plan 是完整 todo plan，执行器可用它理解全局目标和依赖。
+	Plan ResearchTodoPlan
+	// Todo 是当前需要执行的 todo。
+	Todo ResearchTodo
+	// DependencyExecutions 是当前 todo 依赖的已完成结果。
 	DependencyExecutions []TodoExecution
 }
 
@@ -19,10 +22,14 @@ type TodoExecutor func(context.Context, TodoExecutorInput) (TodoExecution, error
 
 // TodoReplannerInput 是 todo 失败后传给 replanner 的上下文。
 type TodoReplannerInput struct {
-	Plan      ResearchTodoPlan
+	// Plan 是当前仍在使用的 plan。
+	Plan ResearchTodoPlan
+	// Completed 是按 plan 顺序排列的已完成或终态 todo。
 	Completed []TodoExecution
-	Failed    TodoExecution
-	Blocked   []TodoExecution
+	// Failed 是触发 replanner 的失败 todo。
+	Failed TodoExecution
+	// Blocked 是因依赖失败而 blocked 的 todo，当前预留给后续 replanner 使用。
+	Blocked []TodoExecution
 }
 
 // TodoReplanner 可以在 todo 失败后返回 plan patch，用于跳过、补充或调整后续 todo。
@@ -30,9 +37,12 @@ type TodoReplanner func(context.Context, TodoReplannerInput) (ResearchTodoPlanPa
 
 // TodoSchedulerConfig 控制 todo 调度并发度和可选 replanner。
 type TodoSchedulerConfig struct {
+	// MaxParallel 是同时执行的 runnable todo 上限。
 	MaxParallel int
-	Executor    TodoExecutor
-	Replanner   TodoReplanner
+	// Executor 是实际执行单个 todo 的函数。
+	Executor TodoExecutor
+	// Replanner 是可选失败恢复策略。
+	Replanner TodoReplanner
 }
 
 // TodoScheduler 按 ResearchTodoPlan 的依赖图执行 todo。
@@ -74,6 +84,7 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 		pending[strings.TrimSpace(todo.ID)] = todo
 	}
 
+	// completed 既保存成功结果，也保存 failed/blocked/skipped 等终态，方便依赖判断。
 	completed := make(map[string]TodoExecution, len(plan.Todos))
 	executions := make([]TodoExecution, 0, len(plan.Todos))
 	for len(pending) > 0 {
@@ -81,6 +92,7 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 			return executions, err
 		}
 
+		// 先传播终态失败依赖，避免下游 todo 永远留在 pending 中。
 		blocked := blockTodosWithTerminalDependencies(plan, pending, completed)
 		for _, execution := range blocked {
 			completed[execution.Todo.ID] = execution
@@ -90,8 +102,10 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 			break
 		}
 
+		// 每轮只取当前依赖已满足的一批 todo，并受 maxParallel 控制。
 		runnable := runnableTodos(plan, pending, completed, s.maxParallel)
 		if len(runnable) == 0 {
+			// 走到这里说明依赖图当前无法继续推进，剩余 todo 统一标记 blocked。
 			for _, todo := range remainingTodosInPlanOrder(plan, pending) {
 				delete(pending, todo.ID)
 				execution := TodoExecution{
@@ -105,6 +119,7 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 			break
 		}
 
+		// runnable 从 pending 删除后再执行，避免并发批次内重复调度。
 		for _, todo := range runnable {
 			delete(pending, todo.ID)
 		}
@@ -114,6 +129,7 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 			completed[execution.Todo.ID] = execution
 			executions = append(executions, execution)
 			if execution.Status == TodoFailed {
+				// 失败后允许 replanner 修补未完成部分；非法 patch 会被忽略并保持原 plan。
 				plan = s.replanAfterFailure(ctx, plan, pending, completed, execution)
 			}
 		}
@@ -132,6 +148,7 @@ func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, tod
 		go func(idx int, current ResearchTodo) {
 			defer wg.Done()
 
+			// 每个 todo 只看到自己直接依赖的 execution，避免 prompt 被无关分支污染。
 			execution, err := s.executor(ctx, TodoExecutorInput{
 				Plan:                 plan,
 				Todo:                 current,

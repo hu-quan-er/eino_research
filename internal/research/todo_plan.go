@@ -10,15 +10,21 @@ import (
 // Planner 只负责生成 sections、todos 和依赖关系；todo 内部要派发哪些 researcher 由
 // TodoDispatcher 在代码层决定，这样可以降低 planner 输出格式复杂度。
 type ResearchTodoPlan struct {
-	Objective string            `json:"objective"`
-	Sections  []ResearchSection `json:"sections"`
-	Todos     []ResearchTodo    `json:"todos"`
+	// Objective 是从用户问题提炼出的研究目标，也是每个 todo 执行时的全局上下文。
+	Objective string `json:"objective"`
+	// Sections 是报告和执行摘要的章节结构。
+	Sections []ResearchSection `json:"sections"`
+	// Todos 是调度器会执行的工作单元列表，顺序同时用于报告展示和依赖解析。
+	Todos []ResearchTodo `json:"todos"`
 }
 
 // ResearchSection 用于把 todo 组织成报告和执行摘要中的逻辑章节。
 type ResearchSection struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
+	// ID 是 section 的稳定引用 ID，todo.section_id 必须指向它。
+	ID string `json:"id"`
+	// Title 是面向用户展示的章节标题。
+	Title string `json:"title"`
+	// Description 是可选章节说明，用于帮助 planner 和读者理解该章节范围。
 	Description string `json:"description,omitempty"`
 }
 
@@ -27,13 +33,20 @@ type ResearchSection struct {
 // DependsOn 只允许引用同一个 plan 中的 todo id；SearchQueries 是给 researcher 的初始
 // 检索提示，不代表 researcher 只能使用这些 query。
 type ResearchTodo struct {
-	ID                 string   `json:"id"`
-	SectionID          string   `json:"section_id"`
-	Title              string   `json:"title"`
-	Question           string   `json:"question"`
-	SearchQueries      []string `json:"search_queries,omitempty"`
+	// ID 是 todo 的稳定引用 ID，依赖关系和执行结果都通过它关联。
+	ID string `json:"id"`
+	// SectionID 指向所属 ResearchSection.ID。
+	SectionID string `json:"section_id"`
+	// Title 是面向用户展示的简短任务名。
+	Title string `json:"title"`
+	// Question 是该 todo 需要回答的具体研究问题。
+	Question string `json:"question"`
+	// SearchQueries 是给 researcher 的初始检索建议，执行时仍允许 researcher 自行扩展 query。
+	SearchQueries []string `json:"search_queries,omitempty"`
+	// AcceptanceCriteria 是判断 todo 是否完成的验收标准。
 	AcceptanceCriteria []string `json:"acceptance_criteria"`
-	DependsOn          []string `json:"depends_on,omitempty"`
+	// DependsOn 是必须先完成的 todo id 列表。
+	DependsOn []string `json:"depends_on,omitempty"`
 }
 
 // ResearchTodoPlanPatch 是失败后 replanner 可以返回的最小补丁格式。
@@ -41,15 +54,21 @@ type ResearchTodo struct {
 // 目前补丁只允许新增 todo、跳过未完成 todo、或调整未完成 todo 的依赖，避免 replanner
 // 修改已完成工作的历史结果。
 type ResearchTodoPlanPatch struct {
-	AddTodos    []ResearchTodo  `json:"add_todos,omitempty"`
-	SkipTodos   []string        `json:"skip_todos,omitempty"`
-	UpdateDeps  []TodoDepsPatch `json:"update_deps,omitempty"`
-	Explanation string          `json:"explanation,omitempty"`
+	// AddTodos 是 replanner 新增的后续 todo，不允许复用既有 todo id。
+	AddTodos []ResearchTodo `json:"add_todos,omitempty"`
+	// SkipTodos 是 replanner 决定跳过的未完成 todo id。
+	SkipTodos []string `json:"skip_todos,omitempty"`
+	// UpdateDeps 替换未完成 todo 的依赖列表。
+	UpdateDeps []TodoDepsPatch `json:"update_deps,omitempty"`
+	// Explanation 说明为什么需要跳过或调整 plan，跳过 todo 时必填。
+	Explanation string `json:"explanation,omitempty"`
 }
 
 // TodoDepsPatch 表示对单个 todo 依赖列表的替换。
 type TodoDepsPatch struct {
-	TodoID    string   `json:"todo_id"`
+	// TodoID 是需要更新依赖的 todo id。
+	TodoID string `json:"todo_id"`
+	// DependsOn 是替换后的完整依赖列表，而不是增量 patch。
 	DependsOn []string `json:"depends_on"`
 }
 
@@ -58,6 +77,7 @@ type TodoDepsPatch struct {
 // 语义质量检查不放在这里，而是由 todo_plan_linter.go 负责，这样结构错误和质量错误
 // 可以分别定位。
 func (p ResearchTodoPlan) Validate() error {
+	// 第一层先检查顶层集合是否存在，避免后续引用校验出现误导性错误。
 	if strings.TrimSpace(p.Objective) == "" {
 		return fmt.Errorf("research todo plan objective is required")
 	}
@@ -68,6 +88,7 @@ func (p ResearchTodoPlan) Validate() error {
 		return fmt.Errorf("research todo plan todos is required")
 	}
 
+	// 第二层收集 section id，后续 todo.section_id 必须引用这里的已有 id。
 	sectionIDs := make(map[string]struct{}, len(p.Sections))
 	for i, section := range p.Sections {
 		id := strings.TrimSpace(section.ID)
@@ -80,6 +101,7 @@ func (p ResearchTodoPlan) Validate() error {
 		sectionIDs[id] = struct{}{}
 	}
 
+	// 第三层校验 todo 自身字段，并暂存依赖关系，依赖目标是否存在会在收集完所有 todo 后检查。
 	todoIDs := make(map[string]struct{}, len(p.Todos))
 	todoDeps := make(map[string][]string, len(p.Todos))
 	for i, todo := range p.Todos {
@@ -116,6 +138,7 @@ func (p ResearchTodoPlan) Validate() error {
 		todoDeps[id] = deps
 	}
 
+	// 所有 todo id 收集完成后再检查依赖引用，允许 todo 依赖列表引用后面定义的 todo。
 	for todoID, deps := range todoDeps {
 		for _, dep := range deps {
 			if _, ok := todoIDs[dep]; !ok {
@@ -124,6 +147,7 @@ func (p ResearchTodoPlan) Validate() error {
 		}
 	}
 
+	// 最后检查依赖图是否有环；调度器要求它是 DAG。
 	if err := validateTodoPlanAcyclic(todoDeps); err != nil {
 		return err
 	}
@@ -170,11 +194,13 @@ func validateTodoPlanAcyclic(deps map[string][]string) error {
 // 已完成 todo 被视为执行历史，不能被跳过或改依赖；补丁应用后会重新运行完整 plan
 // 校验，避免 replanner 引入悬空依赖或依赖环。
 func applyResearchTodoPlanPatch(plan ResearchTodoPlan, patch ResearchTodoPlanPatch, completed map[string]TodoExecution) (ResearchTodoPlan, error) {
+	// completedIDs 是补丁的保护边界：已完成 todo 不允许被跳过或改依赖。
 	completedIDs := make(map[string]struct{}, len(completed))
 	for todoID := range completed {
 		completedIDs[todoID] = struct{}{}
 	}
 
+	// 新增 todo 必须使用全新 ID，否则旧执行结果和新定义会产生歧义。
 	existingTodoIDs := make(map[string]struct{}, len(plan.Todos)+len(patch.AddTodos))
 	for _, todo := range plan.Todos {
 		existingTodoIDs[strings.TrimSpace(todo.ID)] = struct{}{}
@@ -189,6 +215,7 @@ func applyResearchTodoPlanPatch(plan ResearchTodoPlan, patch ResearchTodoPlanPat
 		plan.Todos = append(plan.Todos, todo)
 	}
 
+	// 跳过 todo 会改变研究覆盖范围，因此必须要求 replanner 给出说明。
 	if len(patch.SkipTodos) > 0 && strings.TrimSpace(patch.Explanation) == "" {
 		return ResearchTodoPlan{}, fmt.Errorf("todo plan patch skip_todos requires explanation")
 	}
@@ -201,6 +228,7 @@ func applyResearchTodoPlanPatch(plan ResearchTodoPlan, patch ResearchTodoPlanPat
 		skipped[id] = struct{}{}
 	}
 
+	// update_deps 采用完整替换语义，避免“追加还是删除依赖”的歧义。
 	for _, depPatch := range patch.UpdateDeps {
 		id := strings.TrimSpace(depPatch.TodoID)
 		if _, ok := completedIDs[id]; ok {
@@ -220,6 +248,7 @@ func applyResearchTodoPlanPatch(plan ResearchTodoPlan, patch ResearchTodoPlanPat
 		}
 	}
 
+	// 最后物理移除 skipped todo，再对整个 patched plan 运行完整 Validate。
 	if len(skipped) > 0 {
 		todos := make([]ResearchTodo, 0, len(plan.Todos)-len(skipped))
 		for _, todo := range plan.Todos {

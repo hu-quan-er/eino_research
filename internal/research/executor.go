@@ -37,30 +37,43 @@ type Synthesizer interface {
 
 // ResearcherInput 是传给单个 researcher 的上下文。
 type ResearcherInput struct {
-	Question      string
-	Step          ResearchStep
+	// Question 是全局研究问题或 todo plan objective。
+	Question string
+	// Step 是当前 researcher 需要执行的具体研究步骤。
+	Step ResearchStep
+	// ExecutedSteps 是已完成的依赖或上一轮尝试结果，供当前 researcher 避免重复并补缺口。
 	ExecutedSteps []StepExecution
-	Focus         string
+	// Focus 是调度层分配给该 researcher 的研究视角。
+	Focus string
 }
 
 // SynthesisInput 是传给 synthesizer 的完整并行研究结果。
 type SynthesisInput struct {
-	Question      string
-	Step          ResearchStep
+	// Question 是全局研究问题或 todo plan objective。
+	Question string
+	// Step 是本轮被综合的研究步骤。
+	Step ResearchStep
+	// ExecutedSteps 是已完成上下文，帮助 synthesizer 判断是否仍有 gap。
 	ExecutedSteps []StepExecution
-	Results       []ResearcherResult
+	// Results 是所有 researcher 的输出，包括局部失败信息。
+	Results []ResearcherResult
 }
 
 // StepExecutionInput 是执行一个 ResearchStep 所需的输入。
 type StepExecutionInput struct {
-	Question      string
-	Step          ResearchStep
+	// Question 是全局研究问题或 todo plan objective。
+	Question string
+	// Step 是要执行的研究步骤。
+	Step ResearchStep
+	// ExecutedSteps 是 prior context，来自依赖 todo 或 bounded loop 的前几轮尝试。
 	ExecutedSteps []StepExecution
 }
 
 // ParallelStepExecutor 并行运行多个 researcher，并在至少一个成功时进入 synthesis。
 type ParallelStepExecutor struct {
+	// researchers 是并行执行的研究角色列表。
 	researchers []Researcher
+	// synthesizer 负责把 researchers 的输出合并为 StepExecution。
 	synthesizer Synthesizer
 }
 
@@ -228,6 +241,7 @@ const ResearchExecutedStepsSessionKey = "research_executed_steps"
 // 它从 ADK session 中读取当前 ResearchPlan，执行首个 step，并把 StepExecution 重新写回
 // session，供 replanner 判断是否继续。
 type EinoParallelExecutor struct {
+	// cfg 保存 legacy executor 运行 researcher 所需的模型、搜索 provider 和预算。
 	cfg RunnerConfig
 }
 

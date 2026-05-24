@@ -11,12 +11,18 @@ import (
 // ID 通常只在当前结果集内有效，后续 researcher 结果归一化时可能会重写 ID，以保证不同
 // researcher 返回的 citation 可以稳定合并。
 type Source struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	URL      string `json:"url"`
-	Snippet  string `json:"snippet"`
+	// ID 是当前 research 结果内引用该来源的稳定标识。
+	ID string `json:"id"`
+	// Title 是搜索结果标题。
+	Title string `json:"title"`
+	// URL 是来源地址，也是去重的主键。
+	URL string `json:"url"`
+	// Snippet 是搜索 provider 返回的摘要文本，可用于构造兜底 SourceDocument。
+	Snippet string `json:"snippet"`
+	// Provider 标识来源 provider，例如 google 或 mock。
 	Provider string `json:"provider"`
-	Query    string `json:"query"`
+	// Query 记录发现该来源的搜索 query。
+	Query string `json:"query"`
 }
 
 // Provider 是 research 引擎对搜索能力的最小抽象。

@@ -18,36 +18,51 @@ import (
 
 // SearchLimits 控制单个 step/todo 内 web_search 工具的预算和 source ID 前缀。
 type SearchLimits struct {
+	// MaxSearchesPerStep 是该工具实例最多允许调用 web_search 的次数。
 	MaxSearchesPerStep int
-	ResultsPerSearch   int
-	SourceIDPrefix     string
+	// ResultsPerSearch 是每次搜索默认返回的结果数量。
+	ResultsPerSearch int
+	// SourceIDPrefix 用于重写 source id，避免不同 step/todo 间冲突。
+	SourceIDPrefix string
 }
 
 // FetchLimits 控制单个 step/todo 内 web_fetch 工具的预算、正文长度和抓取结果记录器。
 type FetchLimits struct {
+	// MaxFetchesPerStep 是该工具实例最多允许调用 web_fetch 的次数。
 	MaxFetchesPerStep int
-	MaxContentChars   int
-	MaxBodyBytes      int64
-	Recorder          FetchedPageRecorder
+	// MaxContentChars 是抽取文本返回给模型的最大字符数。
+	MaxContentChars int
+	// MaxBodyBytes 是 HTTP 响应体读取上限，防止大页面占用过多内存。
+	MaxBodyBytes int64
+	// Recorder 记录成功 fetch 的页面，供执行结束后转为 SourceDocument。
+	Recorder FetchedPageRecorder
 }
 
 // WebSearchInput 是暴露给模型的 web_search 工具入参。
 type WebSearchInput struct {
+	// Query 是模型希望执行的搜索 query。
 	Query string `json:"query" jsonschema:"description=Search query to run"`
-	Limit int    `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return"`
+	// Limit 是模型请求的结果上限，最终还会受 ResultsPerSearch 约束。
+	Limit int `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return"`
 }
 
 // WebFetchInput 是暴露给模型的 web_fetch 工具入参。
 type WebFetchInput struct {
-	URL      string `json:"url" jsonschema:"description=HTTP or HTTPS URL to fetch and read"`
-	MaxChars int    `json:"max_chars,omitempty" jsonschema:"description=Maximum number of extracted text characters to return"`
+	// URL 是要读取的 HTTP/HTTPS 页面地址，通常来自 web_search 结果。
+	URL string `json:"url" jsonschema:"description=HTTP or HTTPS URL to fetch and read"`
+	// MaxChars 是模型请求的返回文本上限，最终还会受 MaxContentChars 约束。
+	MaxChars int `json:"max_chars,omitempty" jsonschema:"description=Maximum number of extracted text characters to return"`
 }
 
 // FetchedPage 是 web_fetch 抓取并抽取可读文本后的结果。
 type FetchedPage struct {
-	URL         string `json:"url"`
-	Title       string `json:"title,omitempty"`
-	Text        string `json:"text"`
+	// URL 是规范化后的最终请求 URL。
+	URL string `json:"url"`
+	// Title 是 HTML title 或空值。
+	Title string `json:"title,omitempty"`
+	// Text 是抽取并截断后的可读正文。
+	Text string `json:"text"`
+	// ContentType 是 HTTP Content-Type，便于调试抽取策略。
 	ContentType string `json:"content_type,omitempty"`
 }
 
@@ -103,7 +118,9 @@ func (s *FetchedPageStore) Pages() []FetchedPage {
 
 // HTTPPageFetcher 使用 net/http 抓取页面，并抽取 HTML 可见文本。
 type HTTPPageFetcher struct {
-	Client       *http.Client
+	// Client 是 HTTP 客户端，未设置时使用 http.DefaultClient。
+	Client *http.Client
+	// MaxBodyBytes 是读取响应体的最大字节数；<=0 时使用默认 1MiB。
 	MaxBodyBytes int64
 }
 
@@ -128,6 +145,7 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 		}
 		limit := maxResults
 		if input.Limit > 0 && input.Limit < maxResults {
+			// 模型可以请求更少结果，但不能突破工具配置的上限。
 			limit = input.Limit
 		}
 		sources, err := provider.Search(ctx, input.Query, limit)
@@ -139,6 +157,7 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 			prefix = "src"
 		}
 		for i := range sources {
+			// provider 返回的 ID 可能在不同 query 间重复，这里统一改成本 step/todo 局部递增 ID。
 			sources[i].ID = fmt.Sprintf("%s_%d", prefix, sourceCount.Add(1))
 		}
 		return sources, nil
@@ -168,6 +187,7 @@ func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits) (tool.InvokableToo
 			maxChars = 4000
 		}
 		if input.MaxChars > 0 && input.MaxChars < maxChars {
+			// 模型可以主动缩短返回正文，降低上下文占用。
 			maxChars = input.MaxChars
 		}
 		page, err := fetcher.Fetch(ctx, input.URL, maxChars)
@@ -218,6 +238,7 @@ func (f HTTPPageFetcher) Fetch(ctx context.Context, rawURL string, maxChars int)
 	if maxBodyBytes <= 0 {
 		maxBodyBytes = 1 << 20
 	}
+	// LimitReader 防止抓取超大页面时把整个响应读入内存。
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
 		return FetchedPage{}, fmt.Errorf("read body: %w", err)

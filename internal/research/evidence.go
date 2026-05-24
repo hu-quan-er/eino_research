@@ -58,6 +58,7 @@ func buildFetchedPageDocuments(pages []FetchedPage, sources []search.Source, max
 	sourceByURL := make(map[string]search.Source, len(sources))
 	for _, source := range sources {
 		if url := strings.TrimSpace(source.URL); url != "" {
+			// 用 URL 建索引是为了把 web_fetch 的页面重新挂回 search source。
 			sourceByURL[url] = source
 		}
 	}
@@ -79,6 +80,7 @@ func buildFetchedPageDocuments(pages []FetchedPage, sources []search.Source, max
 		source, ok := sourceByURL[page.URL]
 		sourceID := strings.TrimSpace(source.ID)
 		if !ok || sourceID == "" {
+			// fetch 可能读取了非搜索结果中的链接，这类孤立页面也需要可引用 ID。
 			sourceID = fmt.Sprintf("fetched_%d", nextFetchedID)
 			nextFetchedID++
 		}
@@ -167,8 +169,10 @@ func enrichFindingsEvidence(findings []Finding, documents []SourceDocument) []Fi
 	chunksBySource := firstChunkBySourceID(documents)
 	out := make([]Finding, len(findings))
 	for i, finding := range findings {
+		// evidence_refs 里的 source_id 也要同步回填到 source_ids，保持新旧字段一致。
 		finding.SourceIDs = dedupeStrings(append(finding.SourceIDs, sourceIDsFromEvidenceRefs(finding.EvidenceRefs)...))
 		if len(finding.EvidenceRefs) == 0 {
+			// 老模型只返回 source_ids 时，使用该 source 的首个 chunk 生成 quote 兜底。
 			finding.EvidenceRefs = evidenceRefsFromSourceIDs(finding.SourceIDs, chunksBySource)
 		} else {
 			finding.EvidenceRefs = normalizeEvidenceRefs(finding.EvidenceRefs, chunksBySource)
@@ -243,6 +247,7 @@ func normalizeEvidenceRefs(refs []EvidenceRef, chunks map[string]SourceChunk) []
 		}
 		if ref.ChunkID == "" {
 			if chunk, ok := chunks[ref.SourceID]; ok {
+				// 模型只给 source_id 时，用首个 chunk 补齐 chunk_id 和短 quote。
 				ref.ChunkID = chunk.ID
 				if ref.Quote == "" {
 					ref.Quote = truncateText(chunk.Text, defaultEvidenceQuoteChars)

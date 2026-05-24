@@ -12,9 +12,13 @@ import (
 
 // ModelConfig 是 research 层创建 OpenAI-compatible 模型所需的最小配置。
 type ModelConfig struct {
-	APIKey  string
-	Model   string
+	// APIKey 是 OpenAI-compatible 服务访问密钥。
+	APIKey string
+	// Model 是模型名称。
+	Model string
+	// BaseURL 是兼容 OpenAI API 的服务地址；为空时使用 SDK 默认地址。
 	BaseURL string
+	// Timeout 是单次模型请求超时时间。
 	Timeout time.Duration
 }
 
