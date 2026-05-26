@@ -1,0 +1,24 @@
+cases:
+  - id: eino_research_agent_fit
+    question: "Eino 适合构建 research agent 吗？"
+    required_claims:
+      - "Eino"
+      - "research agent"
+    required_source_hints:
+      - "eino"
+    forbidden_claims:
+      - "guarantees zero production incidents"
+    min_citation_coverage: 0.7
+    max_unsupported_claims: 0
+    min_source_diversity: 1
+
+  - id: deep_research_architecture_options
+    question: "构建 deep research agent 时，plan-and-execute 与多代理 orchestrator-worker 有什么差异？"
+    required_claims:
+      - "plan"
+      - "multi-agent"
+    forbidden_claims:
+      - "always best"
+    min_citation_coverage: 0.7
+    max_unsupported_claims: 0
+    min_source_diversity: 2

@@ -41,6 +41,12 @@ type RunnerConfig struct {
 	TodoReplanner TodoReplanner
 	// TodoDispatcher 可替换默认规则派发器。
 	TodoDispatcher TodoDispatcher
+	// FinalSynthesizer 可替换最终全局综合器；未传入时使用 AgentFinalSynthesizer。
+	FinalSynthesizer FinalSynthesizer
+	// EvidenceBinder 可替换最终答案证据绑定器；未传入时使用 RuleBasedEvidenceBinder。
+	EvidenceBinder EvidenceBinder
+	// ClaimVerifier 可替换最终 claim 校验器；未传入时使用 RuleBasedClaimVerifier。
+	ClaimVerifier ClaimVerifier
 }
 
 // Runner 是 research workflow 的门面。
@@ -250,8 +256,25 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 	result.SectionExecutions = groupTodoExecutionsBySection(plan, todoExecutions)
 	result.Sources = collectTodoExecutionSources(todoExecutions)
 	result.Documents = collectTodoExecutionDocuments(todoExecutions)
-	result.Answer.Summary = fmt.Sprintf("Completed %d todo(s).", countTodoStatus(todoExecutions, TodoDone))
-	result.Answer.Markdown = result.Answer.Summary
+	result.Answer = r.synthesizeFinalAnswer(ctx, FinalSynthesisInput{
+		Question:          question,
+		Plan:              plan,
+		SectionExecutions: result.SectionExecutions,
+		TodoExecutions:    result.TodoExecutions,
+		Sources:           result.Sources,
+		Documents:         result.Documents,
+	})
+	result.Answer = r.bindFinalEvidence(ctx, EvidenceBindingInput{
+		Question:       question,
+		Answer:         result.Answer,
+		Sources:        result.Sources,
+		Documents:      result.Documents,
+		TodoExecutions: result.TodoExecutions,
+	})
+	result.Answer = r.verifyFinalClaims(ctx, ClaimVerificationInput{
+		Question: question,
+		Answer:   result.Answer,
+	})
 
 	return result, nil
 }
@@ -335,7 +358,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 		return TodoExecution{}, err
 	}
 
-	step := todoToResearchStep(in.Todo)
+	step := todoToResearchStep(in.Todo, in.Plan)
 	stepExecutor := NewParallelStepExecutor(researchers, NewAgentSynthesizer(r.cfg.Model))
 	// bounded loop 会在结果存在确定性 gap 时把上一轮执行结果作为 prior context 继续尝试。
 	execution, err := runTodoResearchLoop(ctx, TodoResearchLoopInput{

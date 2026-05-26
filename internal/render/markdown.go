@@ -16,6 +16,7 @@ func Markdown(result research.ResearchResult) string {
 		var sb strings.Builder
 		sb.WriteString(strings.TrimSpace(result.Answer.Markdown))
 		sb.WriteString("\n\n")
+		appendAnswerEvidence(&sb, result)
 		appendExecutionSummary(&sb, result)
 		appendFindingsAndEvidence(&sb, result)
 		appendSources(&sb, result)
@@ -30,6 +31,7 @@ func Markdown(result research.ResearchResult) string {
 	sb.WriteString(result.Answer.Summary)
 	sb.WriteString("\n\n")
 	appendAnswerDetails(&sb, result.Answer)
+	appendAnswerEvidence(&sb, result)
 	appendExecutionSummary(&sb, result)
 	appendFindingsAndEvidence(&sb, result)
 	appendSources(&sb, result)

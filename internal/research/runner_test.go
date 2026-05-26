@@ -52,6 +52,22 @@ func (m *staticToolCallingModel) WithTools(tools []*schema.ToolInfo) (model.Tool
 	return m, nil
 }
 
+type fakeFinalSynthesizer struct {
+	answer Answer
+	err    error
+	input  FinalSynthesisInput
+	calls  int
+}
+
+func (s *fakeFinalSynthesizer) SynthesizeFinal(_ context.Context, in FinalSynthesisInput) (Answer, error) {
+	s.calls++
+	s.input = in
+	if s.err != nil {
+		return Answer{}, s.err
+	}
+	return s.answer, nil
+}
+
 func TestRunnerPlanReturnsValidatedTodoPlan(t *testing.T) {
 	planJSON, err := json.Marshal(validTodoPlan())
 	if err != nil {
@@ -266,10 +282,18 @@ func TestParseResearchTodoPlanReturnsValidationError(t *testing.T) {
 
 func TestRunnerExecuteAggregatesTodoResultsBySection(t *testing.T) {
 	plan := validTodoPlan()
+	finalSynthesizer := &fakeFinalSynthesizer{
+		answer: Answer{
+			Summary:     "Use Eino when you need a composable agent workflow.",
+			Markdown:    "# Final Answer\n\nUse Eino for this prototype.",
+			KeyFindings: []string{"Eino supports composable workflows."},
+		},
+	}
 	runner := newTestRunner(t, RunnerConfig{
 		Model:            &staticToolCallingModel{content: `{}`},
 		SearchProvider:   search.NewMockProvider(),
 		MaxParallelTodos: 2,
+		FinalSynthesizer: finalSynthesizer,
 		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
 			return TodoExecution{
 				Todo:    in.Todo,
@@ -306,6 +330,18 @@ func TestRunnerExecuteAggregatesTodoResultsBySection(t *testing.T) {
 	if len(result.Sources) != 3 {
 		t.Fatalf("sources = %d, want 3", len(result.Sources))
 	}
+	if finalSynthesizer.calls != 1 {
+		t.Fatalf("final synthesizer calls = %d, want 1", finalSynthesizer.calls)
+	}
+	if finalSynthesizer.input.Question != "Should we use Eino?" {
+		t.Fatalf("final synthesizer question = %q", finalSynthesizer.input.Question)
+	}
+	if len(finalSynthesizer.input.SectionExecutions) != 2 {
+		t.Fatalf("final synthesizer sections = %d, want 2", len(finalSynthesizer.input.SectionExecutions))
+	}
+	if result.Answer.Summary != "Use Eino when you need a composable agent workflow." {
+		t.Fatalf("answer summary = %q, want final synthesizer answer", result.Answer.Summary)
+	}
 }
 
 func TestRunnerRunUsesTodoPlanPipeline(t *testing.T) {
@@ -338,6 +374,99 @@ func TestRunnerRunUsesTodoPlanPipeline(t *testing.T) {
 	}
 	if result.Answer.Summary != "Completed 3 todo(s)." {
 		t.Fatalf("summary = %q, want completed todo summary", result.Answer.Summary)
+	}
+}
+
+func TestAgentFinalSynthesizerParsesAnswerJSON(t *testing.T) {
+	synthesizer := NewAgentFinalSynthesizer(&staticToolCallingModel{content: `{
+		"markdown":"# Final\n\nUse Eino with citations [src_1].",
+		"summary":"Use Eino with citations.",
+		"key_findings":["Composable workflows are supported [src_1]."],
+		"limitations":["Only mock evidence was used."]
+	}`})
+
+	answer, err := synthesizer.SynthesizeFinal(context.Background(), FinalSynthesisInput{
+		Question:       "Should we use Eino?",
+		Plan:           validTodoPlan(),
+		TodoExecutions: []TodoExecution{{Todo: validTodoPlan().Todos[0], Status: TodoDone}},
+		Sources: []search.Source{{
+			ID:    "src_1",
+			Title: "Eino docs",
+			URL:   "https://example.com/eino",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SynthesizeFinal() error = %v", err)
+	}
+	if answer.Summary != "Use Eino with citations." {
+		t.Fatalf("summary = %q, want parsed summary", answer.Summary)
+	}
+	if len(answer.KeyFindings) != 1 || !strings.Contains(answer.KeyFindings[0], "[src_1]") {
+		t.Fatalf("key findings = %#v, want cited finding", answer.KeyFindings)
+	}
+}
+
+func TestAgentFinalSynthesizerIgnoresWrongSchemaJSONFallbackMarkdown(t *testing.T) {
+	synthesizer := NewAgentFinalSynthesizer(&staticToolCallingModel{content: `{"objective":"not an answer"}`})
+
+	answer, err := synthesizer.SynthesizeFinal(context.Background(), FinalSynthesisInput{
+		Question:       "Should we use Eino?",
+		Plan:           validTodoPlan(),
+		TodoExecutions: []TodoExecution{{Todo: validTodoPlan().Todos[0], Status: TodoDone}},
+	})
+	if err != nil {
+		t.Fatalf("SynthesizeFinal() error = %v", err)
+	}
+	if strings.Contains(answer.Markdown, "not an answer") {
+		t.Fatalf("markdown = %q, want deterministic fallback instead of wrong-schema JSON", answer.Markdown)
+	}
+	if answer.Summary != "Completed 1 todo(s)." {
+		t.Fatalf("summary = %q, want fallback completed summary", answer.Summary)
+	}
+}
+
+func TestRunnerExecuteFallsBackWhenFinalSynthesizerFails(t *testing.T) {
+	plan := validTodoPlan()
+	runner := newTestRunner(t, RunnerConfig{
+		Model:            &staticToolCallingModel{content: `{}`},
+		SearchProvider:   search.NewMockProvider(),
+		FinalSynthesizer: &fakeFinalSynthesizer{err: errors.New("final model unavailable")},
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{
+				Todo:    in.Todo,
+				Status:  TodoDone,
+				Summary: in.Todo.Title + " complete",
+				Findings: []Finding{{
+					Claim:     "Eino can compose agent workflows.",
+					SourceIDs: []string{in.Todo.ID + "_src_1"},
+				}},
+				Gaps: []string{"needs more production examples"},
+			}, nil
+		},
+	})
+
+	result, err := runner.Execute(context.Background(), "Should we use Eino?", plan)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Answer.Summary != "Completed 3 todo(s)." {
+		t.Fatalf("summary = %q, want fallback completed summary", result.Answer.Summary)
+	}
+	if len(result.Answer.KeyFindings) != 0 {
+		t.Fatalf("key findings = %#v, want unsupported fallback finding removed", result.Answer.KeyFindings)
+	}
+	if len(result.Answer.Limitations) == 0 {
+		t.Fatal("limitations empty, want final synthesis failure recorded")
+	}
+	foundFailure := false
+	for _, limitation := range result.Answer.Limitations {
+		if strings.Contains(limitation, "Final synthesis fallback was used") {
+			foundFailure = true
+			break
+		}
+	}
+	if !foundFailure {
+		t.Fatalf("limitations = %#v, want final synthesis fallback reason", result.Answer.Limitations)
 	}
 }
 

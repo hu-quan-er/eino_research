@@ -88,7 +88,7 @@ func (d RuleBasedTodoDispatcher) Dispatch(ctx context.Context, in TodoDispatchIn
 		return nil, fmt.Errorf("todo id is required")
 	}
 
-	roles := DeriveTodoResearchRoles(in.Todo, in.Plan)
+	roles := deriveTodoResearchRoles(in.Todo, in.Plan, in.DependencyExecutions)
 	limit := d.MaxResearchers
 	if limit <= 0 {
 		limit = len(roles)
@@ -117,9 +117,13 @@ func (d RuleBasedTodoDispatcher) Dispatch(ctx context.Context, in TodoDispatchIn
 
 // DeriveTodoResearchRoles 根据 todo 内容确定需要哪些研究视角。
 //
-// synthesis todo 会走综合/查漏角色；普通 todo 至少包含 background/evidence/counterpoint，
-// 时效性 todo 会额外加入 freshness 角色。
+// synthesis todo 会走综合/查漏角色；普通 todo 会先保留基础研究角色，再按 todo 内容、
+// acceptance criteria 和依赖结果加入更专门的 researcher。
 func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoResearchRole {
+	return deriveTodoResearchRoles(todo, plan, nil)
+}
+
+func deriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan, dependencies []TodoExecution) []TodoResearchRole {
 	if isSynthesisTodo(todo) {
 		return []TodoResearchRole{
 			{
@@ -135,26 +139,55 @@ func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoRes
 		}
 	}
 
-	roles := []TodoResearchRole{
-		{
+	roles := make([]TodoResearchRole, 0, 6)
+	if todoNeedsBackground(todo, plan, dependencies) {
+		roles = appendTodoResearchRole(roles, TodoResearchRole{
 			ID:    "background_researcher",
 			Name:  "Background Researcher",
 			Focus: "definitions, context, timeline, prerequisites, and key concepts for this todo",
-		},
-		{
-			ID:    "evidence_researcher",
-			Name:  "Evidence Researcher",
-			Focus: "authoritative evidence, examples, implementation details, and source-backed facts for this todo",
-		},
+		})
 	}
+	roles = appendTodoResearchRole(roles, TodoResearchRole{
+		ID:    "evidence_researcher",
+		Name:  "Evidence Researcher",
+		Focus: "authoritative evidence, examples, implementation details, and source-backed facts for this todo",
+	})
 	if todoNeedsFreshness(todo, plan) {
-		roles = append(roles, TodoResearchRole{
+		roles = appendTodoResearchRole(roles, TodoResearchRole{
 			ID:    "freshness_researcher",
 			Name:  "Freshness Researcher",
 			Focus: "current information, latest versions, recent changes, dates, and time-sensitive claims",
 		})
 	}
-	roles = append(roles, TodoResearchRole{
+	if todoNeedsImplementationFocus(todo, plan) {
+		roles = appendTodoResearchRole(roles, TodoResearchRole{
+			ID:    "implementation_researcher",
+			Name:  "Implementation Researcher",
+			Focus: "implementation details, APIs, repositories, configuration, integration constraints, and engineering feasibility",
+		})
+	}
+	if todoNeedsComparisonFocus(todo, plan) {
+		roles = appendTodoResearchRole(roles, TodoResearchRole{
+			ID:    "comparison_researcher",
+			Name:  "Comparison Researcher",
+			Focus: "alternatives, tradeoffs, option comparison, decision criteria, and why one path is preferable",
+		})
+	}
+	if todoNeedsQuantitativeFocus(todo, plan) {
+		roles = appendTodoResearchRole(roles, TodoResearchRole{
+			ID:    "quantitative_researcher",
+			Name:  "Quantitative Researcher",
+			Focus: "metrics, benchmarks, prices, performance data, adoption signals, and measurable evidence",
+		})
+	}
+	if dependenciesHaveGaps(dependencies) {
+		roles = appendTodoResearchRole(roles, TodoResearchRole{
+			ID:    "gap_checker",
+			Name:  "Gap Checker",
+			Focus: "resolve gaps inherited from dependency todos before answering this todo",
+		})
+	}
+	roles = appendTodoResearchRole(roles, TodoResearchRole{
 		ID:    "counterpoint_researcher",
 		Name:  "Counterpoint Researcher",
 		Focus: "counterexamples, risks, limitations, conflicting evidence, and dissenting views for this todo",
@@ -162,17 +195,37 @@ func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoRes
 	return roles
 }
 
+func appendTodoResearchRole(roles []TodoResearchRole, role TodoResearchRole) []TodoResearchRole {
+	for _, existing := range roles {
+		if existing.ID == role.ID {
+			return roles
+		}
+	}
+	return append(roles, role)
+}
+
+func todoNeedsBackground(todo ResearchTodo, plan ResearchTodoPlan, dependencies []TodoExecution) bool {
+	if len(dependencies) == 0 {
+		return true
+	}
+	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
+		"background",
+		"concept",
+		"context",
+		"definition",
+		"overview",
+		"背景",
+		"定义",
+		"概念",
+		"上下文",
+	})
+}
+
 // todoNeedsFreshness 用关键词判断 todo 是否需要 freshness_researcher。
 //
 // 这是确定性启发式，后续如果引入模型 judge/dispatcher，也应保留该规则作为 fallback。
 func todoNeedsFreshness(todo ResearchTodo, plan ResearchTodoPlan) bool {
-	text := normalizeLintText(strings.Join([]string{
-		plan.Objective,
-		todo.Title,
-		todo.Question,
-		strings.Join(todo.SearchQueries, " "),
-	}, " "))
-	for _, keyword := range []string{
+	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
 		"2026",
 		"current",
 		"latest",
@@ -183,8 +236,96 @@ func todoNeedsFreshness(todo ResearchTodo, plan ResearchTodoPlan) bool {
 		"recent",
 		"today",
 		"version",
-	} {
-		if strings.Contains(text, keyword) {
+		"当前",
+		"最新",
+		"近期",
+		"今天",
+		"版本",
+	})
+}
+
+func todoNeedsImplementationFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
+	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
+		"api",
+		"architecture",
+		"code",
+		"component",
+		"config",
+		"github",
+		"implementation",
+		"integration",
+		"repository",
+		"sdk",
+		"workflow",
+		"代码",
+		"工程",
+		"接口",
+		"架构",
+		"实现",
+		"组件",
+	})
+}
+
+func todoNeedsComparisonFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
+	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
+		"alternative",
+		"compare",
+		"comparison",
+		"difference",
+		"option",
+		"tradeoff",
+		"versus",
+		"vs",
+		"差异",
+		"对比",
+		"方案",
+		"权衡",
+		"选型",
+	})
+}
+
+func todoNeedsQuantitativeFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
+	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
+		"adoption",
+		"benchmark",
+		"cost",
+		"latency",
+		"metric",
+		"performance",
+		"price",
+		"pricing",
+		"throughput",
+		"成本",
+		"价格",
+		"基准",
+		"性能",
+		"数据",
+		"指标",
+	})
+}
+
+func dependenciesHaveGaps(dependencies []TodoExecution) bool {
+	for _, dependency := range dependencies {
+		if len(dependency.Gaps) > 0 || strings.TrimSpace(dependency.Error) != "" || dependency.Status != TodoDone {
+			return true
+		}
+	}
+	return false
+}
+
+func todoDispatchText(todo ResearchTodo, plan ResearchTodoPlan) string {
+	return normalizeLintText(strings.Join([]string{
+		plan.Objective,
+		todo.Title,
+		todo.Question,
+		strings.Join(todo.SearchQueries, " "),
+		strings.Join(todo.AcceptanceCriteria, " "),
+	}, " "))
+}
+
+func containsAnyDispatchKeyword(text string, keywords []string) bool {
+	for _, keyword := range keywords {
+		if strings.Contains(text, normalizeLintText(keyword)) {
 			return true
 		}
 	}
@@ -192,16 +333,20 @@ func todoNeedsFreshness(todo ResearchTodo, plan ResearchTodoPlan) bool {
 }
 
 // todoToResearchStep 把当前主流程的 ResearchTodo 转换为可复用执行器需要的 ResearchStep。
-func todoToResearchStep(todo ResearchTodo) ResearchStep {
+func todoToResearchStep(todo ResearchTodo, plans ...ResearchTodoPlan) ResearchStep {
 	title := strings.TrimSpace(todo.Title)
 	if title == "" {
 		title = strings.TrimSpace(todo.ID)
+	}
+	var plan ResearchTodoPlan
+	if len(plans) > 0 {
+		plan = plans[0]
 	}
 	return ResearchStep{
 		ID:              strings.TrimSpace(todo.ID),
 		Title:           title,
 		Question:        strings.TrimSpace(todo.Question),
-		SearchQueries:   nonEmptyStrings(todo.SearchQueries),
+		SearchQueries:   ExpandTodoSearchQueries(todo, plan),
 		SuccessCriteria: nonEmptyStrings(todo.AcceptanceCriteria),
 	}
 }

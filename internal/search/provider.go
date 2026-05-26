@@ -23,6 +23,10 @@ type Source struct {
 	Provider string `json:"provider"`
 	// Query 记录发现该来源的搜索 query。
 	Query string `json:"query"`
+	// RankScore 是规则 ranker 给出的相对排序分数。
+	RankScore float64 `json:"rank_score,omitempty"`
+	// RankReason 记录主要排序依据，便于调试和审计来源选择。
+	RankReason string `json:"rank_reason,omitempty"`
 }
 
 // Provider 是 research 引擎对搜索能力的最小抽象。

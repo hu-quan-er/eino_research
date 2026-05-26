@@ -158,6 +158,44 @@ func TestMarkdownFallsBackToDocumentChunkEvidence(t *testing.T) {
 	}
 }
 
+func TestMarkdownIncludesAnswerEvidence(t *testing.T) {
+	result := sampleResult()
+	result.Answer.Evidence = []research.ClaimEvidence{{
+		Claim:     "Eino supports composable workflows.",
+		SourceIDs: []string{"src_1"},
+		EvidenceRefs: []research.EvidenceRef{{
+			SourceID: "src_1",
+			ChunkID:  "src_1_chunk_1",
+			Quote:    "Eino supports composable workflows with tools and agents.",
+		}},
+		Supported: true,
+		Reason:    "matched explicit source id in final answer",
+	}}
+	result.Documents = []research.SourceDocument{{
+		ID:       "src_1_doc",
+		SourceID: "src_1",
+		Title:    "Eino",
+		URL:      "https://example.com/eino",
+		Chunks: []research.SourceChunk{{
+			ID:       "src_1_chunk_1",
+			SourceID: "src_1",
+			Text:     "Eino supports composable workflows with tools and agents.",
+		}},
+	}}
+
+	out := Markdown(result)
+	for _, want := range []string{
+		"## Answer Evidence",
+		"- Eino supports composable workflows. [src_1] (supported)",
+		"  - Reason: matched explicit source id in final answer",
+		`  - Evidence: "Eino supports composable workflows with tools and agents." (Source: src_1 Eino - https://example.com/eino, chunk ` + "`src_1_chunk_1`" + `)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Markdown missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestJSONIsResearchResult(t *testing.T) {
 	out, err := JSON(sampleResult())
 	if err != nil {

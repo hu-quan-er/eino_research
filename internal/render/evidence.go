@@ -46,6 +46,47 @@ func appendFindingsAndEvidence(sb *strings.Builder, result research.ResearchResu
 	}
 }
 
+// appendAnswerEvidence 渲染最终答案层面的 claim -> evidence 绑定结果。
+func appendAnswerEvidence(sb *strings.Builder, result research.ResearchResult) {
+	if len(result.Answer.Evidence) == 0 {
+		return
+	}
+
+	index := buildEvidenceIndex(result)
+	sb.WriteString("## Answer Evidence\n\n")
+	for _, evidence := range result.Answer.Evidence {
+		claim := inlineText(evidence.Claim)
+		if claim == "" {
+			continue
+		}
+		sb.WriteString("- ")
+		sb.WriteString(claim)
+		if ids := claimEvidenceCitationIDs(evidence); len(ids) > 0 {
+			sb.WriteString(" ")
+			sb.WriteString(formatCitationIDs(ids))
+		}
+		if evidence.Supported {
+			sb.WriteString(" (supported)")
+		} else {
+			sb.WriteString(" (unsupported)")
+		}
+		sb.WriteString("\n")
+		if reason := inlineText(evidence.Reason); reason != "" {
+			sb.WriteString("  - Reason: ")
+			sb.WriteString(reason)
+			sb.WriteString("\n")
+		}
+		for _, ref := range evidenceRefsForClaimEvidence(evidence, index) {
+			if rendered := renderEvidenceRef(ref, index); rendered != "" {
+				sb.WriteString("  - Evidence: ")
+				sb.WriteString(rendered)
+				sb.WriteString("\n")
+			}
+		}
+	}
+	sb.WriteString("\n")
+}
+
 // evidenceIndex 是 Markdown 渲染阶段使用的查找表，用于把 source_id/chunk_id 快速映射回
 // source 元数据和 chunk 文本。
 type evidenceIndex struct {
@@ -162,6 +203,16 @@ func findingCitationIDs(finding research.Finding) []string {
 	return dedupeInlineStrings(ids)
 }
 
+// claimEvidenceCitationIDs 合并 ClaimEvidence 的 source_ids 和 evidence_refs.source_id。
+func claimEvidenceCitationIDs(evidence research.ClaimEvidence) []string {
+	ids := make([]string, 0, len(evidence.SourceIDs)+len(evidence.EvidenceRefs))
+	ids = append(ids, evidence.SourceIDs...)
+	for _, ref := range evidence.EvidenceRefs {
+		ids = append(ids, ref.SourceID)
+	}
+	return dedupeInlineStrings(ids)
+}
+
 // evidenceRefsForFinding 返回 finding 可渲染的 evidence_refs，并在必要时从 document chunk
 // 自动补齐 quote。
 func evidenceRefsForFinding(finding research.Finding, index evidenceIndex) []research.EvidenceRef {
@@ -206,6 +257,16 @@ func evidenceRefsForFinding(finding research.Finding, index evidenceIndex) []res
 		refs = append(refs, ref)
 	}
 	return dedupeEvidenceRefs(refs)
+}
+
+// evidenceRefsForClaimEvidence 返回 final answer claim 的可渲染证据。
+func evidenceRefsForClaimEvidence(evidence research.ClaimEvidence, index evidenceIndex) []research.EvidenceRef {
+	if len(evidence.EvidenceRefs) == 0 {
+		finding := research.Finding{SourceIDs: evidence.SourceIDs}
+		return evidenceRefsForFinding(finding, index)
+	}
+	finding := research.Finding{EvidenceRefs: evidence.EvidenceRefs}
+	return evidenceRefsForFinding(finding, index)
 }
 
 // renderEvidenceRef 将单个 evidence ref 渲染为短 quote 加 source/chunk 信息。

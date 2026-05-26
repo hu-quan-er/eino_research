@@ -29,7 +29,7 @@ type ResearchResult struct {
 // Answer 是最终回答的用户可见摘要。
 //
 // Markdown 可以保存模型生成的完整正文；Summary/KeyFindings/Limitations 供 renderer
-// 或调用方做结构化展示。
+// 或调用方做结构化展示。Evidence 保存最终答案层面的 claim -> evidence 绑定结果。
 type Answer struct {
 	// Markdown 是完整回答正文；如果存在，Markdown renderer 会优先保留它。
 	Markdown string `json:"markdown"`
@@ -39,6 +39,8 @@ type Answer struct {
 	KeyFindings []string `json:"key_findings"`
 	// Limitations 是回答的已知限制、证据缺口或不确定性。
 	Limitations []string `json:"limitations"`
+	// Evidence 是最终答案中的关键 claim 对应的证据绑定结果。
+	Evidence []ClaimEvidence `json:"evidence,omitempty"`
 }
 
 // StepExecution 表示一个 ResearchStep 被多个 researcher 执行并综合后的结果。
@@ -105,6 +107,23 @@ type EvidenceRef struct {
 	ChunkID string `json:"chunk_id,omitempty"`
 	// Quote 是用于报告展示的短证据摘录，可由模型提供或系统从 chunk 中截取。
 	Quote string `json:"quote,omitempty"`
+}
+
+// ClaimEvidence 描述最终答案中某个 claim 与证据片段的绑定关系。
+//
+// 它不同于 todo-level Finding：Finding 是研究过程中的中间发现，ClaimEvidence 是最终
+// Answer 级别的核验结果，用于判断最终报告中的关键表述是否能回到具体来源。
+type ClaimEvidence struct {
+	// Claim 是从最终答案中抽取或规范化后的关键判断。
+	Claim string `json:"claim"`
+	// SourceIDs 是该 claim 绑定到的来源 ID。
+	SourceIDs []string `json:"source_ids,omitempty"`
+	// EvidenceRefs 是该 claim 对应的 chunk/quote 证据。
+	EvidenceRefs []EvidenceRef `json:"evidence_refs,omitempty"`
+	// Supported 表示当前系统是否找到可用证据支撑该 claim。
+	Supported bool `json:"supported"`
+	// Reason 记录绑定或无法绑定的原因，便于调试引用质量。
+	Reason string `json:"reason,omitempty"`
 }
 
 // SourceDocument 是 Source 的可切片正文表示。

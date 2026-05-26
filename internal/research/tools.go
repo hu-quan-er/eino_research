@@ -152,6 +152,7 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 		if err != nil {
 			return nil, err
 		}
+		sources = search.RankSources(input.Query, sources)
 		prefix := strings.TrimSpace(limits.SourceIDPrefix)
 		if prefix == "" {
 			prefix = "src"

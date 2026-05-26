@@ -101,6 +101,15 @@ executeTodo
 TodoExecution[]
   |
   v
+FinalSynthesizer
+  |
+  v
+EvidenceBinder
+  |
+  v
+ClaimVerifier
+  |
+  v
 ResearchResult
   |
   v
@@ -131,12 +140,18 @@ render.Markdown / render.JSON
 `internal/research`
 
 - 核心 workflow 所在模块。
-- 包含 planner、todo plan validation、todo scheduler、todo dispatcher、researcher、synthesizer、工具封装、证据归一化和结果模型。
+- 包含 planner、todo plan validation、todo scheduler、todo dispatcher、researcher、todo synthesizer、final synthesizer、evidence binder、claim verifier、工具封装、证据归一化和结果模型。
 
 `internal/render`
 
 - 把 `ResearchResult` 渲染为 Markdown 或 JSON。
 - Markdown 会追加执行摘要、findings/evidence 和 sources。
+
+`internal/eval`
+
+- 读取固定评测问题集。
+- 对 `ResearchResult` 做非模型规则评估。
+- 当前指标包括 citation coverage、unsupported claim count、source diversity、required/forbidden claims 和 required source hints。
 
 ## 数据流
 
@@ -253,10 +268,15 @@ gap check
 TodoExecution
 ```
 
-`RuleBasedTodoDispatcher` 根据 todo 内容派发 researcher 角色：
+`RuleBasedTodoDispatcher` 根据 todo 内容派发 researcher 角色。它不是长期固定三角色，而是“基础角色 + 动态专业角色”的确定性路由：
 
-- 普通 todo：`background_researcher`、`evidence_researcher`、`counterpoint_researcher`。
-- 时效性 todo：额外加入 `freshness_researcher`。
+- 普通 todo：优先包含 `background_researcher` 和 `evidence_researcher`。
+- 时效性 todo：加入 `freshness_researcher`。
+- 工程实现类 todo：加入 `implementation_researcher`。
+- 方案对比/选型类 todo：加入 `comparison_researcher`。
+- 性能、价格、指标类 todo：加入 `quantitative_researcher`。
+- 依赖结果存在 gap/error 时：加入 `gap_checker`。
+- 默认保留 `counterpoint_researcher` 作为反例、风险和冲突证据视角。
 - synthesis todo：使用 `synthesis_researcher` 和 `gap_checker`。
 
 角色数量受 `research.max_researchers_per_todo` 限制。
@@ -268,6 +288,18 @@ TodoExecution
 - role：稳定角色 ID。
 - focus：该角色研究视角。
 - tools：`web_search` 和 `web_fetch`。
+
+todo 转成 `ResearchStep` 时会先做确定性 query expansion：
+
+- 保留 planner 原始 `search_queries`。
+- 追加 official documentation 查询。
+- 工程实现类 todo 追加 GitHub/repository/examples 查询。
+- 时效性 todo 追加 latest/2026 查询。
+- 方案对比类 todo 追加 alternatives/comparison/tradeoffs 查询。
+- 指标类 todo 追加 benchmark/performance/pricing/metrics 查询。
+- 默认追加 limitations/risks/counterexamples 查询。
+
+这些扩展 query 会进入 researcher prompt，researcher 仍可根据上下文自行决定实际调用哪些 query。
 
 researcher 的目标输出是 `ResearcherResult`：
 
@@ -306,6 +338,8 @@ researcher 的目标输出是 `ResearcherResult`：
 
 - 入参：`query`、`limit`。
 - 调用 `search.Provider`。
+- 返回前会执行规则 `RankSources`，按来源权威性、可读摘要、query 相关性等信号排序。
+- 每个 source 会带 `rank_score` 和 `rank_reason`，方便调试来源排序。
 - 按 todo/step 前缀重写 source ID，避免不同 todo 的 `src_1` 冲突。
 - 受 `search.max_searches_per_step` 和 `search.results_per_search` 控制。
 
@@ -370,7 +404,47 @@ researcher 的目标输出是 `ResearcherResult`：
 
 这让 Markdown 报告和 JSON 输出都可以追踪到具体证据片段。
 
-### 9. Result 聚合和渲染
+### 9. Final Synthesis
+
+所有 todo 执行完成并完成 source/document 去重后，`Runner.Execute` 会调用 `FinalSynthesizer` 生成最终 `Answer`。
+
+默认实现是 `AgentFinalSynthesizer`：
+
+- 输入完整 question、plan、section executions、todo executions、sources 和 documents。
+- 要求模型输出 `Answer` JSON：`markdown`、`summary`、`key_findings`、`limitations`。
+- 提示词要求最终报告使用用户问题相同语言，并用 source id 标注关键事实，例如 `[todo_evidence_src_1]`。
+- 如果模型返回非 JSON 文本，会把文本当作 Markdown 正文保留。
+- 如果模型返回合法 JSON 但不是 `Answer` 结构，或最终综合器出错，会基于已完成 todo、findings 和 gaps 生成确定性兜底 answer。
+
+这个阶段解决的是跨 todo 的全局综合问题：todo 内 synthesizer 只负责单个 todo，final synthesizer 才负责最终结论、冲突说明、整体限制和面向用户的完整报告。
+
+### 10. Final Evidence Binding
+
+`FinalSynthesizer` 生成 `Answer` 后，`Runner.Execute` 会调用 `EvidenceBinder` 做最终答案层面的证据绑定。
+
+默认实现是 `RuleBasedEvidenceBinder`：
+
+- 优先读取最终答案中显式出现的 source id，例如 `[src_1]`。
+- 如果没有显式 source id，则用简单文本 overlap 在 `SourceDocument.Chunks` 和 todo findings 中找候选证据。
+- 找到证据时写入 `Answer.Evidence`，形成 claim -> source/chunk/quote 的结构化映射。
+- 找不到证据时把该 claim 标记为 unsupported，并追加到 `Answer.Limitations`。
+
+这个阶段和 todo-level `Finding.evidence_refs` 不同：`Finding` 是研究过程证据，`Answer.Evidence` 是最终报告关键表述的证据绑定结果。
+
+### 11. Claim Verification
+
+`EvidenceBinder` 之后，`Runner.Execute` 会调用 `ClaimVerifier` 做最终 claim 的非模型校验。
+
+默认实现是 `RuleBasedClaimVerifier`：
+
+- 不调用模型 judge。
+- 读取 `Answer.Evidence`。
+- unsupported claim 会从 `Answer.KeyFindings` 中移除，并写入 `Answer.Limitations`。
+- 只有 source-level、缺少 chunk/quote 的 claim 会保留，但标记为弱支持 limitation。
+
+这个阶段的目标是防止结构化关键发现继续传播没有证据支撑的最终 claim。当前版本不会重写 `Answer.Markdown` 正文，Markdown 中的 unsupported claim 会通过 `Answer Evidence` 标记出来。
+
+### 12. Result 聚合和渲染
 
 所有 todo 执行完后，`Runner.Execute` 聚合为 `ResearchResult`：
 
@@ -381,7 +455,16 @@ researcher 的目标输出是 `ResearcherResult`：
     "markdown": "最终 Markdown 正文",
     "summary": "简短摘要",
     "key_findings": [],
-    "limitations": []
+    "limitations": [],
+    "evidence": [
+      {
+        "claim": "最终答案中的关键判断",
+        "source_ids": ["src_1"],
+        "evidence_refs": [{"source_id": "src_1", "chunk_id": "src_1_chunk_1", "quote": "证据摘录"}],
+        "supported": true,
+        "reason": "matched explicit source id in final answer"
+      }
+    ]
   },
   "plan": {},
   "section_executions": [],
@@ -399,16 +482,45 @@ researcher 的目标输出是 `ResearcherResult`：
 - `SectionExecutions` 按原始 plan.sections 和 plan.todos 顺序重排，保证报告结构稳定。
 - `Sources` 从所有 todo sources 汇总并按 URL 去重。
 - `Documents` 从所有 todo documents 汇总并去重。
-- `Answer.Summary` 当前为完成 todo 数摘要。
+- `Answer` 由 `FinalSynthesizer` 生成；若最终综合失败，则回退到基于 todo/findings/gaps 的确定性摘要。
 
 Markdown renderer 会输出：
 
 - 主回答正文。
+- Answer Evidence。
 - Execution Summary。
 - Findings and Evidence。
 - Sources。
 
 JSON renderer 会保留完整结构，适合调试和后续系统集成。
+
+## Eval Harness
+
+项目包含一个最小规则评测层，样例问题位于 `eval/questions.yaml`。
+
+评测用例结构：
+
+```yaml
+cases:
+  - id: eino_research_agent_fit
+    question: "Eino 适合构建 research agent 吗？"
+    required_claims:
+      - "Eino"
+    required_source_hints:
+      - "eino"
+    forbidden_claims:
+      - "guarantees zero production incidents"
+    min_citation_coverage: 0.7
+    max_unsupported_claims: 0
+    min_source_diversity: 1
+```
+
+当前 `internal/eval` 只提供可测试的库函数：
+
+- `LoadSuite(path)`：读取 YAML suite，并启用 strict field 校验。
+- `EvaluateResult(result, case)`：评估单次 `ResearchResult`。
+
+第一版暂不引入模型 judge，也暂不提供 CLI。后续可以在此基础上增加批量运行命令和历史结果对比。
 
 ## 状态和错误边界
 
@@ -441,7 +553,8 @@ todo 状态：
 
 - 用更强的结构化输出约束替换 researcher/synthesizer 的纯 JSON prompt。
 - 为每轮 retry 建立独立工具预算。
-- 加入最终全局 answer synthesis。
+- 继续增强最终全局 answer synthesis，例如加入逐段 citation 绑定和 claim verification。
+- 把当前确定性 EvidenceBinder 升级为“规则优先 + 可选 CitationAgent”。
 - 强化 gap checker 和 acceptance criteria 检查。
 - 引入更丰富的搜索、抓取、解析和 rerank 工具。
 

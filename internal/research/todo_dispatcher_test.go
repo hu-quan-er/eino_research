@@ -7,7 +7,7 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
-func TestRuleBasedTodoDispatcherCreatesEvidenceFanout(t *testing.T) {
+func TestRuleBasedTodoDispatcherCreatesImplementationFanout(t *testing.T) {
 	plan := validTodoPlan()
 	dispatcher := RuleBasedTodoDispatcher{MaxResearchers: 3}
 
@@ -19,7 +19,7 @@ func TestRuleBasedTodoDispatcherCreatesEvidenceFanout(t *testing.T) {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
 
-	want := []string{"background_researcher", "evidence_researcher", "counterpoint_researcher"}
+	want := []string{"background_researcher", "evidence_researcher", "implementation_researcher"}
 	assertJobRoleIDs(t, jobs, want)
 }
 
@@ -55,6 +55,47 @@ func TestRuleBasedTodoDispatcherCreatesSynthesisFanout(t *testing.T) {
 	}
 
 	want := []string{"synthesis_researcher", "gap_checker"}
+	assertJobRoleIDs(t, jobs, want)
+}
+
+func TestRuleBasedTodoDispatcherCreatesComparisonFanout(t *testing.T) {
+	plan := validTodoPlan()
+	todo := plan.Todos[1]
+	todo.Title = "Compare agent framework options"
+	todo.Question = "What tradeoffs exist between Eino and alternative agent frameworks?"
+	todo.AcceptanceCriteria = []string{"Compares options and decision criteria."}
+	dispatcher := RuleBasedTodoDispatcher{MaxResearchers: 3}
+
+	jobs, err := dispatcher.Dispatch(context.Background(), TodoDispatchInput{
+		Plan: plan,
+		Todo: todo,
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+
+	want := []string{"background_researcher", "evidence_researcher", "comparison_researcher"}
+	assertJobRoleIDs(t, jobs, want)
+}
+
+func TestRuleBasedTodoDispatcherAddsGapCheckerForDependencyGaps(t *testing.T) {
+	plan := validTodoPlan()
+	dispatcher := RuleBasedTodoDispatcher{MaxResearchers: 4}
+
+	jobs, err := dispatcher.Dispatch(context.Background(), TodoDispatchInput{
+		Plan: plan,
+		Todo: plan.Todos[1],
+		DependencyExecutions: []TodoExecution{{
+			Todo:   plan.Todos[0],
+			Status: TodoDone,
+			Gaps:   []string{"missing source-backed definition"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+
+	want := []string{"evidence_researcher", "implementation_researcher", "gap_checker", "counterpoint_researcher"}
 	assertJobRoleIDs(t, jobs, want)
 }
 

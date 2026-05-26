@@ -2,6 +2,7 @@ package research
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,15 @@ func (p *recordingProvider) Search(ctx context.Context, query string, limit int)
 	p.calls = append(p.calls, query)
 	p.limits = append(p.limits, limit)
 	return []search.Source{{ID: "src_1", Title: "Result", URL: "https://example.com", Provider: "mock", Query: query}}, nil
+}
+
+type rankingProvider struct{}
+
+func (p rankingProvider) Search(_ context.Context, query string, _ int) ([]search.Source, error) {
+	return []search.Source{
+		{ID: "src_1", Title: "Forum", URL: "http://forum.example.com/eino", Snippet: "Forum notes.", Provider: "mock", Query: query},
+		{ID: "src_2", Title: "Eino official documentation", URL: "https://docs.example.com/eino", Snippet: "Official documentation for Eino workflows.", Provider: "mock", Query: query},
+	}, nil
 }
 
 func TestWebSearchToolRunsProvider(t *testing.T) {
@@ -52,6 +62,31 @@ func TestWebSearchToolCapsInputLimit(t *testing.T) {
 	}
 	if len(provider.limits) != 1 || provider.limits[0] != 5 {
 		t.Fatalf("limits = %+v, want [5]", provider.limits)
+	}
+}
+
+func TestWebSearchToolRanksSources(t *testing.T) {
+	tool, err := NewWebSearchTool(rankingProvider{}, SearchLimits{MaxSearchesPerStep: 1, ResultsPerSearch: 5})
+	if err != nil {
+		t.Fatalf("NewWebSearchTool: %v", err)
+	}
+
+	out, err := tool.InvokableRun(context.Background(), `{"query":"Eino workflow documentation"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var sources []search.Source
+	if err := json.Unmarshal([]byte(out), &sources); err != nil {
+		t.Fatalf("unmarshal output: %v\n%s", err, out)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources = %d, want 2", len(sources))
+	}
+	if sources[0].Title != "Eino official documentation" {
+		t.Fatalf("top source = %#v, want official docs first", sources[0])
+	}
+	if sources[0].RankScore <= 0 || sources[0].RankReason == "" {
+		t.Fatalf("rank metadata missing: %#v", sources[0])
 	}
 }
 
