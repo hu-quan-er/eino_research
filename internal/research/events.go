@@ -18,20 +18,20 @@ const (
 	EventTodoStarted     EventKind = "todo.started"
 	EventTodoCompleted   EventKind = "todo.completed"
 	EventTodoFailed      EventKind = "todo.failed"
-	EventDispatch        EventKind = "todo.dispatched"
-	EventResearcherStart EventKind = "researcher.started"
-	EventResearcherDone  EventKind = "researcher.completed"
-	EventToolCall        EventKind = "tool.call"
-	EventSynthesis       EventKind = "synthesis.completed"
-	EventGapRetry        EventKind = "todo.retry"
-	EventFinalStart      EventKind = "final.started"
+	EventTodoDispatched      EventKind = "todo.dispatched"
+	EventResearcherStarted   EventKind = "researcher.started"
+	EventResearcherCompleted EventKind = "researcher.completed"
+	EventToolCall            EventKind = "tool.call"
+	EventSynthesisCompleted  EventKind = "synthesis.completed"
+	EventGapRetry            EventKind = "todo.retry"
+	EventFinalStarted        EventKind = "final.started"
 	EventFinalCompleted  EventKind = "final.completed"
 	EventEvidenceBound   EventKind = "evidence.bound"
 	EventClaimsVerified  EventKind = "claims.verified"
 	EventTraceTruncated  EventKind = "trace.truncated"
 )
 
-// Event 是阶段边界发出的结构化事件。所有字段均为 omitempty 友好。
+// Event 是阶段边界发出的结构化事件。Kind、At、RunID 为必填字段；其他字段使用 omitempty。
 type Event struct {
 	Kind       EventKind       `json:"kind"`
 	At         time.Time       `json:"at"`
@@ -58,7 +58,7 @@ type EventSink interface {
 // EventBus 把事件 fan-out 到所有 sink。nil 接收者安全：所有方法都是 no-op。
 // Emit 内部对每个 sink 单独 recover，单个 sink panic 不影响其他 sink 和主路径。
 type EventBus struct {
-	mu    sync.RWMutex
+	mu    sync.Mutex
 	sinks []EventSink
 }
 
@@ -81,9 +81,9 @@ func (b *EventBus) Emit(ctx context.Context, e Event) {
 	if e.At.IsZero() {
 		e.At = time.Now()
 	}
-	b.mu.RLock()
+	b.mu.Lock()
 	sinks := append([]EventSink(nil), b.sinks...)
-	b.mu.RUnlock()
+	b.mu.Unlock()
 	for _, sink := range sinks {
 		safeEmit(ctx, sink, e)
 	}

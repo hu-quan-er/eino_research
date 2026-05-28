@@ -132,20 +132,20 @@ const (
 	EventTodoStarted     EventKind = "todo.started"
 	EventTodoCompleted   EventKind = "todo.completed"
 	EventTodoFailed      EventKind = "todo.failed"
-	EventDispatch        EventKind = "todo.dispatched"
-	EventResearcherStart EventKind = "researcher.started"
-	EventResearcherDone  EventKind = "researcher.completed"
-	EventToolCall        EventKind = "tool.call"
-	EventSynthesis       EventKind = "synthesis.completed"
-	EventGapRetry        EventKind = "todo.retry"
-	EventFinalStart      EventKind = "final.started"
+	EventTodoDispatched      EventKind = "todo.dispatched"
+	EventResearcherStarted   EventKind = "researcher.started"
+	EventResearcherCompleted EventKind = "researcher.completed"
+	EventToolCall            EventKind = "tool.call"
+	EventSynthesisCompleted  EventKind = "synthesis.completed"
+	EventGapRetry            EventKind = "todo.retry"
+	EventFinalStarted        EventKind = "final.started"
 	EventFinalCompleted  EventKind = "final.completed"
 	EventEvidenceBound   EventKind = "evidence.bound"
 	EventClaimsVerified  EventKind = "claims.verified"
 	EventTraceTruncated  EventKind = "trace.truncated"
 )
 
-// Event 是阶段边界发出的结构化事件。所有字段均为 omitempty 友好。
+// Event 是阶段边界发出的结构化事件。Kind、At、RunID 为必填字段；其他字段使用 omitempty。
 type Event struct {
 	Kind       EventKind       `json:"kind"`
 	At         time.Time       `json:"at"`
@@ -505,7 +505,7 @@ func TestBudgetMeterAggregatesEvents(t *testing.T) {
 	meter.Emit(ctx, Event{Kind: EventToolCall, Tool: "web_fetch"})
 	meter.Emit(ctx, Event{Kind: EventTodoCompleted})
 	meter.Emit(ctx, Event{Kind: EventTodoFailed})
-	meter.Emit(ctx, Event{Kind: EventSynthesis, TokensIn: 100, TokensOut: 50})
+	meter.Emit(ctx, Event{Kind: EventSynthesisCompleted, TokensIn: 100, TokensOut: 50})
 	meter.Emit(ctx, Event{Kind: EventFinalCompleted, TokensIn: 200, TokensOut: 80, DurationMS: 1234})
 
 	report := meter.Snapshot()
@@ -577,7 +577,7 @@ func (m *BudgetMeter) Emit(_ context.Context, e Event) {
 		m.report.TodosCompleted++
 	case EventTodoFailed:
 		m.report.TodosFailed++
-	case EventSynthesis, EventFinalCompleted, EventPlanCompleted:
+	case EventSynthesisCompleted, EventFinalCompleted, EventPlanCompleted:
 		m.report.ModelCalls++
 	}
 	m.report.TokensIn += e.TokensIn
@@ -749,7 +749,7 @@ func TestRunnerExecutePopulatesTraceAndBudget(t *testing.T) {
 	for _, e := range result.Metadata.Trace {
 		kinds[e.Kind]++
 	}
-	for _, want := range []EventKind{EventFinalStart, EventFinalCompleted, EventEvidenceBound, EventClaimsVerified} {
+	for _, want := range []EventKind{EventFinalStarted, EventFinalCompleted, EventEvidenceBound, EventClaimsVerified} {
 		if kinds[want] == 0 {
 			t.Errorf("missing event kind %s in trace", want)
 		}
@@ -880,7 +880,7 @@ func runIDFromContext(ctx context.Context) string {
 (e) 在 `Execute` 主体里，把最终阶段的 emit 加上：在调用 `synthesizeFinalAnswer` 前后、`bindFinalEvidence` 后、`verifyFinalClaims` 后各 emit 一条：
 
 ```go
-	bus.Emit(ctx, Event{Kind: EventFinalStart, RunID: runID})
+	bus.Emit(ctx, Event{Kind: EventFinalStarted, RunID: runID})
 	result.Answer = r.synthesizeFinalAnswer(ctx, FinalSynthesisInput{...})
 	bus.Emit(ctx, Event{Kind: EventFinalCompleted, RunID: runID})
 
@@ -1012,11 +1012,11 @@ func TestDefaultExecuteTodoEmitsResearcherAndSynthesisEvents(t *testing.T) {
 	for _, e := range rec.Snapshot() {
 		kinds[e.Kind]++
 	}
-	if kinds[EventDispatch] == 0 {
-		t.Errorf("missing %s", EventDispatch)
+	if kinds[EventTodoDispatched] == 0 {
+		t.Errorf("missing %s", EventTodoDispatched)
 	}
-	if kinds[EventResearcherStart] == 0 {
-		t.Errorf("missing %s", EventResearcherStart)
+	if kinds[EventResearcherStarted] == 0 {
+		t.Errorf("missing %s", EventResearcherStarted)
 	}
 }
 ```
@@ -1048,7 +1048,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 		bus.Emit(ctx, Event{Kind: EventTodoFailed, RunID: runID, TodoID: in.Todo.ID, Err: err.Error()})
 		return TodoExecution{}, err
 	}
-	bus.Emit(ctx, Event{Kind: EventDispatch, RunID: runID, TodoID: in.Todo.ID, Message: fmt.Sprintf("%d researcher jobs", len(jobs))})
+	bus.Emit(ctx, Event{Kind: EventTodoDispatched, RunID: runID, TodoID: in.Todo.ID, Message: fmt.Sprintf("%d researcher jobs", len(jobs))})
 
 	// ...原有 searchTool / fetchTool / researchers 构造...
 
@@ -1062,7 +1062,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 		MaxAttempts:          r.cfg.MaxTodoResearchIterations,
 		ExecuteStep: func(ctx context.Context, input StepExecutionInput) (StepExecution, error) {
 			for _, job := range jobs {
-				bus.Emit(ctx, Event{Kind: EventResearcherStart, RunID: runID, TodoID: in.Todo.ID, Role: job.RoleID})
+				bus.Emit(ctx, Event{Kind: EventResearcherStarted, RunID: runID, TodoID: in.Todo.ID, Role: job.RoleID})
 			}
 			if strings.TrimSpace(input.Step.ID) == "" {
 				input.Step = step
@@ -1072,9 +1072,9 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 				return StepExecution{}, err
 			}
 			for _, res := range execution.ResearcherResults {
-				bus.Emit(ctx, Event{Kind: EventResearcherDone, RunID: runID, TodoID: in.Todo.ID, Role: res.Role})
+				bus.Emit(ctx, Event{Kind: EventResearcherCompleted, RunID: runID, TodoID: in.Todo.ID, Role: res.Role})
 			}
-			bus.Emit(ctx, Event{Kind: EventSynthesis, RunID: runID, TodoID: in.Todo.ID})
+			bus.Emit(ctx, Event{Kind: EventSynthesisCompleted, RunID: runID, TodoID: in.Todo.ID})
 			execution.Documents = mergeSourceDocuments(
 				buildFetchedPageDocuments(fetchedPages.Pages(), execution.Sources, defaultSourceChunkChars),
 				execution.Documents,
@@ -1459,7 +1459,7 @@ func TestRunnerRunFullEventTopology(t *testing.T) {
 	required := []EventKind{
 		EventPlanStarted, EventPlanCompleted,
 		EventTodoStarted, EventTodoCompleted,
-		EventFinalStart, EventFinalCompleted,
+		EventFinalStarted, EventFinalCompleted,
 		EventEvidenceBound, EventClaimsVerified,
 	}
 	got := make(map[EventKind]int)
