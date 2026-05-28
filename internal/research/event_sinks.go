@@ -2,6 +2,10 @@ package research
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 )
@@ -55,4 +59,33 @@ func (s *TraceStore) Snapshot() []Event {
 	out := make([]Event, len(s.events))
 	copy(out, s.events)
 	return out
+}
+
+// JSONLinesSink 把每条事件序列化为一行 JSON 写到 io.Writer。
+// 内部 mutex 保证并发 emit 时不会出现行撕裂。
+type JSONLinesSink struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+// NewJSONLinesSink 创建一个写到给定 writer 的 sink。w 为 nil 时退化为 os.Stderr。
+func NewJSONLinesSink(w io.Writer) *JSONLinesSink {
+	if w == nil {
+		w = os.Stderr
+	}
+	return &JSONLinesSink{w: w}
+}
+
+// Emit 写一行 JSON。序列化或写入失败时打印到 stderr，不向上传播。
+func (s *JSONLinesSink) Emit(_ context.Context, e Event) {
+	data, err := json.Marshal(e)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jsonlines sink marshal error: %v\n", err)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.w.Write(append(data, '\n')); err != nil {
+		fmt.Fprintf(os.Stderr, "jsonlines sink write error: %v\n", err)
+	}
 }

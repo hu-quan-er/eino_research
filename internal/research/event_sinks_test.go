@@ -1,7 +1,10 @@
 package research
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -90,5 +93,51 @@ func TestTraceStoreConcurrentEmitAndSnapshot(t *testing.T) {
 	final := store.Snapshot()
 	if len(final) != emitters*perEmitter {
 		t.Fatalf("want %d events, got %d", emitters*perEmitter, len(final))
+	}
+}
+
+func TestJSONLinesSinkWritesOneJSONPerLine(t *testing.T) {
+	var buf bytes.Buffer
+	sink := NewJSONLinesSink(&buf)
+	ctx := context.Background()
+	sink.Emit(ctx, Event{Kind: EventPlanStarted, RunID: "r1"})
+	sink.Emit(ctx, Event{Kind: EventPlanCompleted, RunID: "r1"})
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 lines, got %d", len(lines))
+	}
+	var got Event
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("line 0 not valid JSON: %v", err)
+	}
+	if got.Kind != EventPlanStarted {
+		t.Fatalf("want kind %s, got %s", EventPlanStarted, got.Kind)
+	}
+}
+
+func TestJSONLinesSinkConcurrent(t *testing.T) {
+	var buf bytes.Buffer
+	sink := NewJSONLinesSink(&buf)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	const n = 200
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sink.Emit(ctx, Event{Kind: EventTodoStarted, RunID: "r1"})
+		}()
+	}
+	wg.Wait()
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != n {
+		t.Fatalf("want %d lines, got %d", n, len(lines))
+	}
+	for i, line := range lines {
+		var e Event
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("line %d torn: %v (raw=%q)", i, err, line)
+		}
 	}
 }
