@@ -13,11 +13,11 @@ import (
 type EventKind string
 
 const (
-	EventPlanStarted     EventKind = "plan.started"
-	EventPlanCompleted   EventKind = "plan.completed"
-	EventTodoStarted     EventKind = "todo.started"
-	EventTodoCompleted   EventKind = "todo.completed"
-	EventTodoFailed      EventKind = "todo.failed"
+	EventPlanStarted         EventKind = "plan.started"
+	EventPlanCompleted       EventKind = "plan.completed"
+	EventTodoStarted         EventKind = "todo.started"
+	EventTodoCompleted       EventKind = "todo.completed"
+	EventTodoFailed          EventKind = "todo.failed"
 	EventTodoDispatched      EventKind = "todo.dispatched"
 	EventResearcherStarted   EventKind = "researcher.started"
 	EventResearcherCompleted EventKind = "researcher.completed"
@@ -25,10 +25,10 @@ const (
 	EventSynthesisCompleted  EventKind = "synthesis.completed"
 	EventGapRetry            EventKind = "todo.retry"
 	EventFinalStarted        EventKind = "final.started"
-	EventFinalCompleted  EventKind = "final.completed"
-	EventEvidenceBound   EventKind = "evidence.bound"
-	EventClaimsVerified  EventKind = "claims.verified"
-	EventTraceTruncated  EventKind = "trace.truncated"
+	EventFinalCompleted      EventKind = "final.completed"
+	EventEvidenceBound       EventKind = "evidence.bound"
+	EventClaimsVerified      EventKind = "claims.verified"
+	EventTraceTruncated      EventKind = "trace.truncated"
 )
 
 // Event 是阶段边界发出的结构化事件。Kind、At、RunID 为必填字段；其他字段使用 omitempty。
