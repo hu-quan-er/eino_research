@@ -45,6 +45,15 @@ func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExe
 		if err := ctx.Err(); err != nil {
 			return StepExecution{}, err
 		}
+		if attempt > 1 {
+			// 第 1 轮是常规执行；只有进入第 2 轮起才算 gap 驱动的 retry。
+			eventBusFromContext(ctx).Emit(ctx, Event{
+				Kind:    EventGapRetry,
+				RunID:   runIDFromContext(ctx),
+				TodoID:  in.Todo.ID,
+				Attempt: attempt,
+			})
+		}
 
 		// 每一轮都把“依赖结果 + 前几轮尝试结果”作为上下文，帮助模型针对 gap 补充研究。
 		executedSteps := append([]StepExecution{}, baseSteps...)

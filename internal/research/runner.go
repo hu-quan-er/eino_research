@@ -343,6 +343,11 @@ func (r *Runner) Run(ctx context.Context, question string) (result ResearchResul
 // 逻辑顺序为：派发 researcher jobs、构建 web_search/web_fetch 工具、并行执行 researcher、
 // synthesis、bounded gap retry，最后把 StepExecution 转回 TodoExecution。
 func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExecution, error) {
+	// todo.started/completed/failed 由 TodoScheduler 统一发出（覆盖所有 executor 实现）；
+	// executeTodo 只负责发出执行器内部的 dispatch/researcher/synthesis 事件。
+	bus := eventBusFromContext(ctx)
+	runID := runIDFromContext(ctx)
+
 	maxSearches := r.cfg.MaxSearchesPerStep
 	if maxSearches <= 0 {
 		maxSearches = 6
@@ -372,6 +377,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	if len(jobs) == 0 {
 		return TodoExecution{}, fmt.Errorf("todo dispatcher returned no jobs for todo %s", in.Todo.ID)
 	}
+	bus.Emit(ctx, Event{Kind: EventTodoDispatched, RunID: runID, TodoID: in.Todo.ID, Message: fmt.Sprintf("%d researcher jobs", len(jobs))})
 
 	searchTool, err := NewWebSearchTool(r.cfg.SearchProvider, SearchLimits{
 		MaxSearchesPerStep: maxSearches,
@@ -406,6 +412,9 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 		DependencyExecutions: in.DependencyExecutions,
 		MaxAttempts:          r.cfg.MaxTodoResearchIterations,
 		ExecuteStep: func(ctx context.Context, input StepExecutionInput) (StepExecution, error) {
+			for _, job := range jobs {
+				bus.Emit(ctx, Event{Kind: EventResearcherStarted, RunID: runID, TodoID: in.Todo.ID, Role: job.RoleID})
+			}
 			if strings.TrimSpace(input.Step.ID) == "" {
 				input.Step = step
 			}
@@ -413,6 +422,10 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 			if err != nil {
 				return StepExecution{}, err
 			}
+			for _, res := range execution.ResearcherResults {
+				bus.Emit(ctx, Event{Kind: EventResearcherCompleted, RunID: runID, TodoID: in.Todo.ID, Role: res.Role})
+			}
+			bus.Emit(ctx, Event{Kind: EventSynthesisCompleted, RunID: runID, TodoID: in.Todo.ID})
 			// fetched 正文比搜索 snippet 更适合做 evidence quote，因此作为 primary document 合并。
 			execution.Documents = mergeSourceDocuments(
 				buildFetchedPageDocuments(fetchedPages.Pages(), execution.Sources, defaultSourceChunkChars),

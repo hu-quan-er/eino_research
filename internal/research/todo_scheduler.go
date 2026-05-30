@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TodoExecutorInput 是调度器调用单个 todo executor 时传入的上下文。
@@ -143,10 +144,17 @@ func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, tod
 	results := make([]TodoExecution, len(todos))
 	var wg sync.WaitGroup
 
+	bus := eventBusFromContext(ctx)
+	runID := runIDFromContext(ctx)
+
 	for i, todo := range todos {
 		wg.Add(1)
 		go func(idx int, current ResearchTodo) {
 			defer wg.Done()
+
+			// todo 生命周期事件在调度层统一发出，覆盖默认与注入的所有 executor 实现。
+			todoStart := time.Now()
+			bus.Emit(ctx, Event{Kind: EventTodoStarted, RunID: runID, TodoID: current.ID})
 
 			// 每个 todo 只看到自己直接依赖的 execution，避免 prompt 被无关分支污染。
 			execution, err := s.executor(ctx, TodoExecutorInput{
@@ -160,6 +168,7 @@ func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, tod
 					Status: TodoFailed,
 					Error:  err.Error(),
 				}
+				bus.Emit(ctx, Event{Kind: EventTodoFailed, RunID: runID, TodoID: current.ID, Err: err.Error(), DurationMS: time.Since(todoStart).Milliseconds()})
 				return
 			}
 			if strings.TrimSpace(execution.Todo.ID) == "" {
@@ -169,6 +178,11 @@ func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, tod
 				execution.Status = TodoDone
 			}
 			results[idx] = execution
+			if execution.Status == TodoFailed {
+				bus.Emit(ctx, Event{Kind: EventTodoFailed, RunID: runID, TodoID: current.ID, Err: execution.Error, DurationMS: time.Since(todoStart).Milliseconds()})
+			} else {
+				bus.Emit(ctx, Event{Kind: EventTodoCompleted, RunID: runID, TodoID: current.ID, DurationMS: time.Since(todoStart).Milliseconds()})
+			}
 		}(i, todo)
 	}
 

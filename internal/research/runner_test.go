@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
@@ -13,6 +14,8 @@ import (
 )
 
 type staticToolCallingModel struct {
+	// mu 保护并发字段：默认 executeTodo 路径会并行驱动多个 researcher 共享同一个 model。
+	mu              sync.Mutex
 	content         string
 	contents        []string
 	toolCalls       []schema.ToolCall
@@ -24,6 +27,8 @@ type staticToolCallingModel struct {
 }
 
 func (m *staticToolCallingModel) Generate(_ context.Context, _ []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls++
 	m.lastOptions = model.GetCommonOptions(nil, opts...)
 	if len(m.toolCalls) > 0 {
@@ -40,10 +45,14 @@ func (m *staticToolCallingModel) Generate(_ context.Context, _ []*schema.Message
 }
 
 func (m *staticToolCallingModel) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage(m.content, nil)}), nil
 }
 
 func (m *staticToolCallingModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.withToolsCalled = true
 	m.boundTools = tools
 	if !m.supportTools {
@@ -592,5 +601,79 @@ func TestRunnerExecuteHonorsExternalEventBus(t *testing.T) {
 	// 即便外部传入 bus，Runner 也应填充 Metadata.Trace/Budget（deviation from plan）。
 	if result.Metadata.Trace == nil || result.Metadata.Budget == nil {
 		t.Fatal("Metadata.Trace/Budget must be populated even with external bus")
+	}
+}
+
+func TestExecuteTodoEmitsLifecycleEvents(t *testing.T) {
+	rec := &recordingSink{}
+	bus := &EventBus{}
+	bus.Add(rec)
+	planJSON := `{
+		"objective": "Test",
+		"sections": [{"id": "s1", "title": "S1"}],
+		"todos": [{"id": "t1", "section_id": "s1", "title": "T1", "question": "Q?",
+		           "search_queries": ["q"], "acceptance_criteria": ["ac"]}]
+	}`
+	model := &staticToolCallingModel{content: `{"summary":"s"}`}
+	runner, err := NewRunner(RunnerConfig{
+		Model:          model,
+		SearchProvider: search.NewMockProvider(),
+		Events:         bus,
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{Todo: in.Todo, Status: TodoDone, Summary: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	var plan ResearchTodoPlan
+	_ = json.Unmarshal([]byte(planJSON), &plan)
+	if _, err := runner.Execute(context.Background(), "Q?", plan); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	kinds := make(map[EventKind]int)
+	for _, e := range rec.Snapshot() {
+		kinds[e.Kind]++
+	}
+	for _, want := range []EventKind{EventTodoStarted, EventTodoCompleted} {
+		if kinds[want] == 0 {
+			t.Errorf("missing event kind %s", want)
+		}
+	}
+}
+
+func TestDefaultExecuteTodoEmitsResearcherAndDispatchEvents(t *testing.T) {
+	rec := &recordingSink{}
+	bus := &EventBus{}
+	bus.Add(rec)
+	model := &staticToolCallingModel{content: `{"role":"evidence_researcher","focus":"f","queries":["q"],"findings":[]}`, supportTools: true}
+	planJSON := `{
+		"objective": "Test",
+		"sections": [{"id": "s1", "title": "S1"}],
+		"todos": [{"id": "t1", "section_id": "s1", "title": "T1", "question": "Q?",
+		           "search_queries": ["q"], "acceptance_criteria": ["ac"]}]
+	}`
+	runner, err := NewRunner(RunnerConfig{
+		Model:          model,
+		SearchProvider: search.NewMockProvider(),
+		Events:         bus,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	var plan ResearchTodoPlan
+	_ = json.Unmarshal([]byte(planJSON), &plan)
+	if _, err := runner.Execute(context.Background(), "Q?", plan); err != nil {
+		t.Logf("Execute err (allowed): %v", err)
+	}
+	kinds := make(map[EventKind]int)
+	for _, e := range rec.Snapshot() {
+		kinds[e.Kind]++
+	}
+	if kinds[EventTodoDispatched] == 0 {
+		t.Errorf("missing %s", EventTodoDispatched)
+	}
+	if kinds[EventResearcherStarted] == 0 {
+		t.Errorf("missing %s", EventResearcherStarted)
 	}
 }
