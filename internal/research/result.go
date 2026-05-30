@@ -179,6 +179,10 @@ type Metadata struct {
 	CompletedAt string `json:"completed_at"`
 	// DurationMS 是 run 总耗时，单位毫秒。
 	DurationMS int64 `json:"duration_ms"`
+	// Trace 是事件追踪记录，由 Runner 在 Execute 结束时从内置 TraceStore 写入。
+	Trace []Event `json:"trace,omitempty"`
+	// Budget 是事件累计统计，由 Runner 在 Execute 结束时从内置 BudgetMeter 写入。
+	Budget *BudgetReport `json:"budget,omitempty"`
 }
 
 // RunError 保存结构化错误阶段，CLI 的 JSON 输出会依赖它向调用方暴露失败原因。

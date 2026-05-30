@@ -484,3 +484,33 @@ func newTestRunner(t *testing.T, cfg RunnerConfig) *Runner {
 	}
 	return runner
 }
+
+func TestMetadataTraceAndBudgetSerialization(t *testing.T) {
+	md := Metadata{
+		Model:          "gpt-4.1",
+		SearchProvider: "mock",
+	}
+	data, err := json.Marshal(md)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"trace"`) {
+		t.Errorf("trace must be omitempty when empty, got %s", data)
+	}
+	if strings.Contains(string(data), `"budget"`) {
+		t.Errorf("budget must be omitempty when nil, got %s", data)
+	}
+
+	md.Trace = []Event{{Kind: EventPlanStarted}}
+	md.Budget = &BudgetReport{ModelCalls: 3}
+	data, err = json.Marshal(md)
+	if err != nil {
+		t.Fatalf("marshal with values: %v", err)
+	}
+	if !strings.Contains(string(data), `"trace"`) {
+		t.Errorf("trace should be present when set, got %s", data)
+	}
+	if !strings.Contains(string(data), `"budget"`) {
+		t.Errorf("budget should be present when set, got %s", data)
+	}
+}
