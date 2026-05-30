@@ -50,6 +50,8 @@ func run(args []string) int {
 	planOnly := fs.Bool("plan-only", false, "generate and print the plan without executing")
 	planJSON := fs.Bool("plan-json", false, "with --plan-only, print ResearchTodoPlan JSON")
 	verbose := fs.Bool("verbose", false, "print progress to stderr")
+	stream := fs.Bool("stream", false, "write JSON-lines event stream to stderr")
+	trace := fs.Bool("trace", false, "include Metadata.Trace in JSON output")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -138,6 +140,13 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "running research with provider=%s max_todo_research_iterations=%d timeout=%s\n", searchName, cfg.Research.MaxTodoResearchIterations, cfg.Model.Timeout.Round(time.Second))
 	}
 
+	// 事件总线：--stream 时把每条事件以 JSON-lines 写到 stderr，便于观察执行过程。
+	// Runner 内部仍会挂上自己的 TraceStore/BudgetMeter，因此 Metadata.Trace/Budget 始终可用。
+	bus := &research.EventBus{}
+	if *stream {
+		bus.Add(research.NewJSONLinesSink(os.Stderr))
+	}
+
 	runner, err := research.NewRunner(research.RunnerConfig{
 		Model:                     model,
 		SearchProvider:            sp,
@@ -148,6 +157,7 @@ func run(args []string) int {
 		MaxParallelTodos:          *maxParallel,
 		MaxResearchersPerTodo:     cfg.Research.MaxResearchersPerTodo,
 		MaxTodoResearchIterations: cfg.Research.MaxTodoResearchIterations,
+		Events:                    bus,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "runner error: %v\n", err)
@@ -192,7 +202,7 @@ func run(args []string) int {
 			result.Error = &research.RunError{Stage: "run", Message: err.Error()}
 		}
 		if cfg.Output.Format == "json" {
-			out, _ := render.JSON(result)
+			out, _ := render.JSON(stripTraceForOutput(result, *trace))
 			fmt.Print(out)
 		} else {
 			fmt.Fprintf(os.Stderr, "run error: %v\n", err)
@@ -201,7 +211,7 @@ func run(args []string) int {
 	}
 
 	if cfg.Output.Format == "json" {
-		out, err := render.JSON(result)
+		out, err := render.JSON(stripTraceForOutput(result, *trace))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "render error: %v\n", err)
 			return 1
@@ -212,6 +222,16 @@ func run(args []string) int {
 
 	fmt.Print(render.Markdown(result))
 	return 0
+}
+
+// stripTraceForOutput 在 --trace 关闭时返回去掉 Metadata.Trace 的副本，避免 JSON 输出过大。
+// Metadata.Budget 体积小且常用，始终保留。
+func stripTraceForOutput(result research.ResearchResult, includeTrace bool) research.ResearchResult {
+	if includeTrace {
+		return result
+	}
+	result.Metadata.Trace = nil
+	return result
 }
 
 // flagProvided 判断某个 flag 是否由用户显式提供，用于区分默认值和命令行覆盖。

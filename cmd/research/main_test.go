@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -344,4 +345,70 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", "")
 	t.Setenv("GOOGLE_API_KEY", "")
 	t.Setenv("GOOGLE_CSE_ID", "")
+}
+
+func TestStreamFlagEmitsJSONLEventsToStderr(t *testing.T) {
+	chdir(t, t.TempDir())
+	clearConfigEnv(t)
+	installFakeModel(t)
+	withNonInteractiveStdin(t)
+
+	code, _, stderr := captureOutput(t, func() int {
+		return run([]string{"--yes", "--stream", "Should we use Eino?"})
+	})
+	if code != 0 {
+		t.Fatalf("run returned %d, want 0; stderr=%q", code, stderr)
+	}
+
+	// stderr 混有 plan 预览文本和 JSON-lines 事件；至少应有一行合法事件 JSON，
+	// 且任何以 { 开头的行都必须是合法 JSON（不能撕裂）。
+	foundEvent := false
+	for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var e research.Event
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("malformed JSON event line %q: %v", line, err)
+		}
+		if e.Kind != "" {
+			foundEvent = true
+		}
+	}
+	if !foundEvent {
+		t.Fatalf("expected at least one JSON event line on stderr, got %q", stderr)
+	}
+}
+
+func TestStreamFlagOffEmitsNoEventsToStderr(t *testing.T) {
+	chdir(t, t.TempDir())
+	clearConfigEnv(t)
+	installFakeModel(t)
+	withNonInteractiveStdin(t)
+
+	code, _, stderr := captureOutput(t, func() int {
+		return run([]string{"--yes", "Should we use Eino?"})
+	})
+	if code != 0 {
+		t.Fatalf("run returned %d, want 0; stderr=%q", code, stderr)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+		if strings.HasPrefix(line, `{"kind"`) {
+			t.Fatalf("did not expect event JSON without --stream, got line %q", line)
+		}
+	}
+}
+
+func TestTraceFlagControlsJSONOutput(t *testing.T) {
+	result := research.ResearchResult{
+		Metadata: research.Metadata{Trace: []research.Event{{Kind: research.EventPlanStarted}}},
+	}
+	withTrace := stripTraceForOutput(result, true)
+	if len(withTrace.Metadata.Trace) == 0 {
+		t.Error("--trace=true should keep Metadata.Trace")
+	}
+	withoutTrace := stripTraceForOutput(result, false)
+	if len(withoutTrace.Metadata.Trace) != 0 {
+		t.Error("--trace=false should strip Metadata.Trace")
+	}
 }
