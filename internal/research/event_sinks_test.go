@@ -116,6 +116,48 @@ func TestJSONLinesSinkWritesOneJSONPerLine(t *testing.T) {
 	}
 }
 
+func TestBudgetMeterAggregatesEvents(t *testing.T) {
+	meter := NewBudgetMeter()
+	ctx := context.Background()
+	meter.Emit(ctx, Event{Kind: EventToolCall, Tool: "web_search"})
+	meter.Emit(ctx, Event{Kind: EventToolCall, Tool: "web_search"})
+	meter.Emit(ctx, Event{Kind: EventToolCall, Tool: "web_fetch"})
+	meter.Emit(ctx, Event{Kind: EventTodoCompleted})
+	meter.Emit(ctx, Event{Kind: EventTodoFailed})
+	meter.Emit(ctx, Event{Kind: EventSynthesisCompleted, TokensIn: 100, TokensOut: 50})
+	meter.Emit(ctx, Event{Kind: EventFinalCompleted, TokensIn: 200, TokensOut: 80, DurationMS: 1234})
+
+	report := meter.Snapshot()
+	if report.ToolCalls["web_search"] != 2 {
+		t.Errorf("web_search: want 2, got %d", report.ToolCalls["web_search"])
+	}
+	if report.ToolCalls["web_fetch"] != 1 {
+		t.Errorf("web_fetch: want 1, got %d", report.ToolCalls["web_fetch"])
+	}
+	if report.TodosCompleted != 1 {
+		t.Errorf("todos completed: want 1, got %d", report.TodosCompleted)
+	}
+	if report.TodosFailed != 1 {
+		t.Errorf("todos failed: want 1, got %d", report.TodosFailed)
+	}
+	if report.TokensIn != 300 || report.TokensOut != 130 {
+		t.Errorf("tokens: want in=300 out=130, got in=%d out=%d", report.TokensIn, report.TokensOut)
+	}
+	if report.DurationMS != 1234 {
+		t.Errorf("duration: want 1234, got %d", report.DurationMS)
+	}
+}
+
+func TestBudgetMeterSnapshotCopiesToolCalls(t *testing.T) {
+	meter := NewBudgetMeter()
+	meter.Emit(context.Background(), Event{Kind: EventToolCall, Tool: "web_search"})
+	snap := meter.Snapshot()
+	snap.ToolCalls["web_search"] = 999
+	if meter.Snapshot().ToolCalls["web_search"] != 1 {
+		t.Fatal("snapshot ToolCalls should be a copy, but mutation propagated")
+	}
+}
+
 func TestJSONLinesSinkConcurrent(t *testing.T) {
 	var buf bytes.Buffer
 	sink := NewJSONLinesSink(&buf)

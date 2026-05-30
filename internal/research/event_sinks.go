@@ -61,6 +61,67 @@ func (s *TraceStore) Snapshot() []Event {
 	return out
 }
 
+// BudgetReport 是 BudgetMeter 对一次 run 的聚合统计。
+type BudgetReport struct {
+	TodosCompleted   int            `json:"todos_completed"`
+	TodosFailed      int            `json:"todos_failed"`
+	ToolCalls        map[string]int `json:"tool_calls,omitempty"`
+	ModelCalls       int            `json:"model_calls"`
+	TokensIn         int            `json:"tokens_in"`
+	TokensOut        int            `json:"tokens_out"`
+	DurationMS       int64          `json:"duration_ms"`
+	ReflectionPasses int            `json:"reflection_passes"` // Phase 3 用，Phase 1 永远为 0
+}
+
+// BudgetMeter 是把事件聚合为 BudgetReport 的 sink。
+// ToolCall/Synthesis/FinalCompleted 等事件会累加对应字段。
+type BudgetMeter struct {
+	mu     sync.Mutex
+	report BudgetReport
+}
+
+// NewBudgetMeter 创建空 BudgetMeter。
+func NewBudgetMeter() *BudgetMeter {
+	return &BudgetMeter{report: BudgetReport{ToolCalls: make(map[string]int)}}
+}
+
+// Emit 根据事件类别更新累计统计。
+func (m *BudgetMeter) Emit(_ context.Context, e Event) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch e.Kind {
+	case EventToolCall:
+		if e.Tool != "" {
+			m.report.ToolCalls[e.Tool]++
+		}
+	case EventTodoCompleted:
+		m.report.TodosCompleted++
+	case EventTodoFailed:
+		m.report.TodosFailed++
+	case EventSynthesisCompleted, EventFinalCompleted, EventPlanCompleted:
+		m.report.ModelCalls++
+	}
+	m.report.TokensIn += e.TokensIn
+	m.report.TokensOut += e.TokensOut
+	if e.Kind == EventFinalCompleted && e.DurationMS > 0 {
+		// FinalCompleted 携带整次 run 的总耗时；上层 emit 时填了 DurationMS 才覆盖。
+		m.report.DurationMS = e.DurationMS
+	}
+}
+
+// Snapshot 返回当前累计的副本（ToolCalls map 也是副本）。
+func (m *BudgetMeter) Snapshot() BudgetReport {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.report
+	tc := make(map[string]int, len(m.report.ToolCalls))
+	for k, v := range m.report.ToolCalls {
+		tc[k] = v
+	}
+	out.ToolCalls = tc
+	return out
+}
+
 // JSONLinesSink 把每条事件序列化为一行 JSON 写到 io.Writer。
 // 内部 mutex 保证并发 emit 时不会出现行撕裂。
 type JSONLinesSink struct {
