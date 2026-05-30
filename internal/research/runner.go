@@ -47,6 +47,9 @@ type RunnerConfig struct {
 	EvidenceBinder EvidenceBinder
 	// ClaimVerifier 可替换最终 claim 校验器；未传入时使用 RuleBasedClaimVerifier。
 	ClaimVerifier ClaimVerifier
+	// Events 是可选的外部事件总线。无论是否传入，Runner 都会在 Execute 内部额外挂上
+	// TraceStore 和 BudgetMeter 以填充 Metadata.Trace/Budget；传入时事件也会 fan-out 给它。
+	Events *EventBus
 }
 
 // Runner 是 research workflow 的门面。
@@ -94,6 +97,13 @@ func (r *Runner) Plan(ctx context.Context, question string) (ResearchTodoPlan, e
 	if strings.TrimSpace(question) == "" {
 		return ResearchTodoPlan{}, fmt.Errorf("question is required")
 	}
+
+	runID := runIDFromContext(ctx)
+	if runID == "" {
+		runID = generateRunID()
+	}
+	r.cfg.Events.Emit(ctx, Event{Kind: EventPlanStarted, RunID: runID})
+	defer r.cfg.Events.Emit(ctx, Event{Kind: EventPlanCompleted, RunID: runID})
 
 	// 首选 tool-call，因为 schema 约束能显著减少 planner 输出格式漂移。
 	if plan, previousOutput, previousErr := r.planWithToolCall(ctx, question); previousErr == nil {
@@ -211,10 +221,33 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 			StartedAt:                 started.Format(time.RFC3339),
 		},
 	}
+
+	// 事件总线：复用 caller 传入的 bus（如有），并始终额外挂上内置 TraceStore/BudgetMeter，
+	// 保证 Metadata.Trace/Budget 总有值，同时把事件 fan-out 给外部 bus。
+	bus := r.cfg.Events
+	if bus == nil {
+		bus = &EventBus{}
+	}
+	trace := NewTraceStore(0)
+	budget := NewBudgetMeter()
+	bus.Add(trace)
+	bus.Add(budget)
+
+	runID := runIDFromContext(ctx)
+	if runID == "" {
+		runID = generateRunID()
+	}
+	// 把 bus 和 runID 通过 ctx 下传给 scheduler/executor/tool，避免改动它们的签名。
+	ctx = withEventBus(ctx, bus)
+	ctx = WithRunID(ctx, runID)
+
 	defer func() {
 		completed := time.Now()
 		result.Metadata.CompletedAt = completed.Format(time.RFC3339)
 		result.Metadata.DurationMS = completed.Sub(started).Milliseconds()
+		result.Metadata.Trace = trace.Snapshot()
+		snap := budget.Snapshot()
+		result.Metadata.Budget = &snap
 	}()
 
 	if strings.TrimSpace(question) == "" {
@@ -256,6 +289,7 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 	result.SectionExecutions = groupTodoExecutionsBySection(plan, todoExecutions)
 	result.Sources = collectTodoExecutionSources(todoExecutions)
 	result.Documents = collectTodoExecutionDocuments(todoExecutions)
+	bus.Emit(ctx, Event{Kind: EventFinalStarted, RunID: runID})
 	result.Answer = r.synthesizeFinalAnswer(ctx, FinalSynthesisInput{
 		Question:          question,
 		Plan:              plan,
@@ -264,6 +298,8 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 		Sources:           result.Sources,
 		Documents:         result.Documents,
 	})
+	bus.Emit(ctx, Event{Kind: EventFinalCompleted, RunID: runID})
+
 	result.Answer = r.bindFinalEvidence(ctx, EvidenceBindingInput{
 		Question:       question,
 		Answer:         result.Answer,
@@ -271,10 +307,13 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 		Documents:      result.Documents,
 		TodoExecutions: result.TodoExecutions,
 	})
+	bus.Emit(ctx, Event{Kind: EventEvidenceBound, RunID: runID})
+
 	result.Answer = r.verifyFinalClaims(ctx, ClaimVerificationInput{
 		Question: question,
 		Answer:   result.Answer,
 	})
+	bus.Emit(ctx, Event{Kind: EventClaimsVerified, RunID: runID})
 
 	return result, nil
 }

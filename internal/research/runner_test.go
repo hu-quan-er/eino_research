@@ -514,3 +514,83 @@ func TestMetadataTraceAndBudgetSerialization(t *testing.T) {
 		t.Errorf("budget should be present when set, got %s", data)
 	}
 }
+
+func TestRunnerExecutePopulatesTraceAndBudget(t *testing.T) {
+	planJSON := `{
+		"objective": "Test",
+		"sections": [{"id": "s1", "title": "S1"}],
+		"todos": [{"id": "t1", "section_id": "s1", "title": "T1", "question": "Q?",
+		           "search_queries": ["q"], "acceptance_criteria": ["ac"]}]
+	}`
+	model := &staticToolCallingModel{content: `{"markdown":"answer [src_1]","summary":"s","key_findings":["kf"],"limitations":[]}`}
+	runner, err := NewRunner(RunnerConfig{
+		Model:          model,
+		SearchProvider: search.NewMockProvider(),
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{Todo: in.Todo, Status: TodoDone, Summary: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	var plan ResearchTodoPlan
+	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+		t.Fatalf("unmarshal plan: %v", err)
+	}
+	result, err := runner.Execute(context.Background(), "Q?", plan)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Metadata.Trace == nil {
+		t.Fatal("Metadata.Trace must be populated by default internal TraceStore")
+	}
+	if result.Metadata.Budget == nil {
+		t.Fatal("Metadata.Budget must be populated by default internal BudgetMeter")
+	}
+	kinds := make(map[EventKind]int)
+	for _, e := range result.Metadata.Trace {
+		kinds[e.Kind]++
+	}
+	for _, want := range []EventKind{EventFinalStarted, EventFinalCompleted, EventEvidenceBound, EventClaimsVerified} {
+		if kinds[want] == 0 {
+			t.Errorf("missing event kind %s in trace", want)
+		}
+	}
+}
+
+func TestRunnerExecuteHonorsExternalEventBus(t *testing.T) {
+	rec := &recordingSink{}
+	bus := &EventBus{}
+	bus.Add(rec)
+	planJSON := `{
+		"objective": "Test",
+		"sections": [{"id": "s1", "title": "S1"}],
+		"todos": [{"id": "t1", "section_id": "s1", "title": "T1", "question": "Q?",
+		           "search_queries": ["q"], "acceptance_criteria": ["ac"]}]
+	}`
+	model := &staticToolCallingModel{content: `{"summary":"s"}`}
+	runner, err := NewRunner(RunnerConfig{
+		Model:          model,
+		SearchProvider: search.NewMockProvider(),
+		Events:         bus,
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{Todo: in.Todo, Status: TodoDone}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	var plan ResearchTodoPlan
+	_ = json.Unmarshal([]byte(planJSON), &plan)
+	result, err := runner.Execute(context.Background(), "Q?", plan)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(rec.Snapshot()) == 0 {
+		t.Fatal("external bus should receive events")
+	}
+	// 即便外部传入 bus，Runner 也应填充 Metadata.Trace/Budget（deviation from plan）。
+	if result.Metadata.Trace == nil || result.Metadata.Budget == nil {
+		t.Fatal("Metadata.Trace/Budget must be populated even with external bus")
+	}
+}

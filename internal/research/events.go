@@ -55,6 +55,36 @@ type EventSink interface {
 	Emit(ctx context.Context, e Event)
 }
 
+type eventBusKey struct{}
+
+// withEventBus 把 bus 写入 ctx，供下游 executor/tool 在不改方法签名的前提下取用。
+func withEventBus(ctx context.Context, bus *EventBus) context.Context {
+	return context.WithValue(ctx, eventBusKey{}, bus)
+}
+
+// eventBusFromContext 返回 ctx 中携带的 EventBus；不存在时返回 nil（nil bus 的 Emit 安全）。
+func eventBusFromContext(ctx context.Context) *EventBus {
+	v, _ := ctx.Value(eventBusKey{}).(*EventBus)
+	return v
+}
+
+type runIDKey struct{}
+
+// WithRunID 把外部 run ID 写入 ctx，让 Runner 在 emit 事件时复用（HTTP 服务可借此关联一次 run）。
+func WithRunID(ctx context.Context, runID string) context.Context {
+	return context.WithValue(ctx, runIDKey{}, runID)
+}
+
+func runIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(runIDKey{}).(string)
+	return v
+}
+
+// generateRunID 返回基于时间戳的 run ID，足够唯一以便区分单进程内多次 run。
+func generateRunID() string {
+	return fmt.Sprintf("run_%d", time.Now().UnixNano())
+}
+
 // EventBus 把事件 fan-out 到所有 sink。nil 接收者安全：所有方法都是 no-op。
 // Emit 内部对每个 sink 单独 recover，单个 sink panic 不影响其他 sink 和主路径。
 type EventBus struct {
