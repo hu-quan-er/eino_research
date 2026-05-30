@@ -677,3 +677,45 @@ func TestDefaultExecuteTodoEmitsResearcherAndDispatchEvents(t *testing.T) {
 		t.Errorf("missing %s", EventResearcherStarted)
 	}
 }
+
+func TestRunnerRunFullEventTopology(t *testing.T) {
+	planJSON := `{
+		"objective": "Test",
+		"sections": [{"id": "s1", "title": "S1"}],
+		"todos": [{"id": "t1", "section_id": "s1", "title": "T1", "question": "Q?",
+		           "search_queries": ["q"], "acceptance_criteria": ["ac"]}]
+	}`
+	model := &staticToolCallingModel{contents: []string{planJSON, `{"summary":"s"}`}}
+	rec := &recordingSink{}
+	bus := &EventBus{}
+	bus.Add(rec)
+	runner, err := NewRunner(RunnerConfig{
+		Model:          model,
+		SearchProvider: search.NewMockProvider(),
+		Events:         bus,
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{Todo: in.Todo, Status: TodoDone, Summary: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	if _, err := runner.Run(context.Background(), "Q?"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	required := []EventKind{
+		EventPlanStarted, EventPlanCompleted,
+		EventTodoStarted, EventTodoCompleted,
+		EventFinalStarted, EventFinalCompleted,
+		EventEvidenceBound, EventClaimsVerified,
+	}
+	got := make(map[EventKind]int)
+	for _, e := range rec.Snapshot() {
+		got[e.Kind]++
+	}
+	for _, k := range required {
+		if got[k] == 0 {
+			t.Errorf("missing event kind %s; got=%v", k, got)
+		}
+	}
+}

@@ -22,6 +22,18 @@ go run ./cmd/research --provider mock --plan-only "Eino 适合构建 research ag
 go run ./cmd/research --provider mock --yes --json "Eino 适合构建 research agent 吗？"
 ```
 
+观察事件流（每条事件一行 JSON，写到 stderr）：
+
+```bash
+go run ./cmd/research --provider mock --yes --stream "Eino 适合构建 research agent 吗？"
+```
+
+在 JSON 输出中包含完整事件 trace（默认会省略以控制体积；`budget` 统计始终保留）：
+
+```bash
+go run ./cmd/research --provider mock --yes --json --trace "Eino 适合构建 research agent 吗？"
+```
+
 ## 配置
 
 复制 `research.example.yaml` 为 `research.yaml`，把非敏感默认值写入配置文件。密钥建议使用环境变量注入：
