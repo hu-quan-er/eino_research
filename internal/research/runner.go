@@ -379,11 +379,17 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	}
 	bus.Emit(ctx, Event{Kind: EventTodoDispatched, RunID: runID, TodoID: in.Todo.ID, Message: fmt.Sprintf("%d researcher jobs", len(jobs))})
 
+	// 工具调用事件通过 bus 转发，使 BudgetMeter 能统计 web_search/web_fetch 次数。
+	toolEmit := ToolEmitFunc(func(ctx context.Context, e Event) {
+		e.RunID = runID
+		e.TodoID = in.Todo.ID
+		bus.Emit(ctx, e)
+	})
 	searchTool, err := NewWebSearchTool(r.cfg.SearchProvider, SearchLimits{
 		MaxSearchesPerStep: maxSearches,
 		ResultsPerSearch:   resultsPerSearch,
 		SourceIDPrefix:     sourceIDPrefix(in.Todo.ID),
-	})
+	}, WithToolEmit(toolEmit))
 	if err != nil {
 		return TodoExecution{}, fmt.Errorf("new web search tool: %w", err)
 	}
@@ -393,7 +399,7 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 		MaxFetchesPerStep: maxSearches,
 		MaxContentChars:   4000,
 		Recorder:          fetchedPages,
-	})
+	}, WithToolEmit(toolEmit))
 	if err != nil {
 		return TodoExecution{}, fmt.Errorf("new web fetch tool: %w", err)
 	}

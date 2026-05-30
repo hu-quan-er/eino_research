@@ -16,6 +16,40 @@ import (
 	"golang.org/x/net/html"
 )
 
+// ToolEmitFunc 是工具调用 emit 回调，签名与 EventBus.Emit 一致，但允许 nil。
+type ToolEmitFunc func(ctx context.Context, e Event)
+
+// safe 调用回调并吞掉 panic；nil 回调直接返回，使工具在无事件总线时零成本。
+func (e ToolEmitFunc) safe(ctx context.Context, ev Event) {
+	if e == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	e(ctx, ev)
+}
+
+// ToolOption 是 NewWebSearchTool / NewWebFetchTool 的可选参数。
+type ToolOption func(*toolOptions)
+
+type toolOptions struct {
+	emit ToolEmitFunc
+}
+
+// WithToolEmit 注入 emit 回调，工具会在每次成功调用后发出一条 EventToolCall。
+func WithToolEmit(emit ToolEmitFunc) ToolOption {
+	return func(o *toolOptions) { o.emit = emit }
+}
+
+func applyToolOptions(opts []ToolOption) toolOptions {
+	out := toolOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&out)
+		}
+	}
+	return out
+}
+
 // SearchLimits 控制单个 step/todo 内 web_search 工具的预算和 source ID 前缀。
 type SearchLimits struct {
 	// MaxSearchesPerStep 是该工具实例最多允许调用 web_search 的次数。
@@ -128,7 +162,8 @@ type HTTPPageFetcher struct {
 //
 // 工具内部使用 atomic 计数限制调用次数；返回的 Source ID 会按 SourceIDPrefix 重写，
 // 避免不同 step/todo 的 source ID 冲突。
-func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.InvokableTool, error) {
+func NewWebSearchTool(provider search.Provider, limits SearchLimits, opts ...ToolOption) (tool.InvokableTool, error) {
+	options := applyToolOptions(opts)
 	var count atomic.Int64
 	var sourceCount atomic.Int64
 	return utils.InferTool("web_search", "Search the web for current research sources.", func(ctx context.Context, input WebSearchInput) ([]search.Source, error) {
@@ -161,6 +196,7 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 			// provider 返回的 ID 可能在不同 query 间重复，这里统一改成本 step/todo 局部递增 ID。
 			sources[i].ID = fmt.Sprintf("%s_%d", prefix, sourceCount.Add(1))
 		}
+		options.emit.safe(ctx, Event{Kind: EventToolCall, Tool: "web_search", Query: input.Query})
 		return sources, nil
 	})
 }
@@ -168,10 +204,11 @@ func NewWebSearchTool(provider search.Provider, limits SearchLimits) (tool.Invok
 // NewWebFetchTool 创建模型可调用的 web_fetch 工具。
 //
 // fetch 成功后会写入 Recorder，供执行层在 step 结束时生成更完整的 SourceDocument。
-func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits) (tool.InvokableTool, error) {
+func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits, opts ...ToolOption) (tool.InvokableTool, error) {
 	if isNilDependency(fetcher) {
 		fetcher = HTTPPageFetcher{MaxBodyBytes: limits.MaxBodyBytes}
 	}
+	options := applyToolOptions(opts)
 
 	var count atomic.Int64
 	return utils.InferTool("web_fetch", "Fetch and read the visible text from a web page URL found by web_search.", func(ctx context.Context, input WebFetchInput) (FetchedPage, error) {
@@ -198,6 +235,7 @@ func NewWebFetchTool(fetcher PageFetcher, limits FetchLimits) (tool.InvokableToo
 		if limits.Recorder != nil {
 			limits.Recorder.RecordFetchedPage(page)
 		}
+		options.emit.safe(ctx, Event{Kind: EventToolCall, Tool: "web_fetch", URL: input.URL})
 		return page, nil
 	})
 }

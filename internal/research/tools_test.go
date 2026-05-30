@@ -3,6 +3,7 @@ package research
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -206,4 +207,49 @@ func (f *recordingFetcher) Fetch(_ context.Context, url string, _ int) (FetchedP
 		Title: "Recorded",
 		Text:  "Recorded content",
 	}, nil
+}
+
+func TestWebSearchToolEmitsToolCallEvent(t *testing.T) {
+	provider := &recordingProvider{}
+	var got []Event
+	emit := func(_ context.Context, e Event) { got = append(got, e) }
+	toolImpl, err := NewWebSearchTool(provider, SearchLimits{MaxSearchesPerStep: 2, ResultsPerSearch: 5}, WithToolEmit(emit))
+	if err != nil {
+		t.Fatalf("NewWebSearchTool: %v", err)
+	}
+	if _, err := toolImpl.InvokableRun(context.Background(), `{"query":"q","limit":1}`); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected at least one tool.call event")
+	}
+	if got[0].Kind != EventToolCall || got[0].Tool != "web_search" {
+		t.Fatalf("unexpected event: %+v", got[0])
+	}
+	if got[0].Query != "q" {
+		t.Errorf("event query: want q, got %s", got[0].Query)
+	}
+}
+
+func TestWebFetchToolEmitsToolCallEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<html><body>hi</body></html>")
+	}))
+	defer server.Close()
+	var got []Event
+	emit := func(_ context.Context, e Event) { got = append(got, e) }
+	toolImpl, err := NewWebFetchTool(HTTPPageFetcher{Client: server.Client()}, FetchLimits{MaxFetchesPerStep: 1, MaxContentChars: 100}, WithToolEmit(emit))
+	if err != nil {
+		t.Fatalf("NewWebFetchTool: %v", err)
+	}
+	if _, err := toolImpl.InvokableRun(context.Background(), `{"url":"`+server.URL+`"}`); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if len(got) == 0 || got[0].Kind != EventToolCall || got[0].Tool != "web_fetch" {
+		t.Fatalf("expected web_fetch tool.call event, got %+v", got)
+	}
+	if got[0].URL != server.URL {
+		t.Errorf("event url: want %s, got %s", server.URL, got[0].URL)
+	}
 }
