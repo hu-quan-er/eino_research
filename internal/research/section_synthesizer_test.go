@@ -1,0 +1,50 @@
+package research
+
+import (
+	"context"
+	"testing"
+)
+
+func TestAgentSectionSynthesizerParsesValidJSON(t *testing.T) {
+	model := &staticToolCallingModel{content: `{"section_id":"s1","title":"S1","summary":"section summary","key_findings":["f1 [src_1]"],"limitations":["lim1"]}`}
+	synth := NewAgentSectionSynthesizer(model)
+	ans, err := synth.SynthesizeSection(context.Background(), SectionSynthesisInput{
+		Question: "Q?",
+		Section:  ResearchSection{ID: "s1", Title: "S1"},
+		Todos:    []TodoExecution{{Todo: ResearchTodo{ID: "t1"}, Status: TodoDone, Summary: "todo sum"}},
+	})
+	if err != nil {
+		t.Fatalf("SynthesizeSection: %v", err)
+	}
+	if ans.Summary != "section summary" {
+		t.Errorf("summary = %q, want %q", ans.Summary, "section summary")
+	}
+	if len(ans.KeyFindings) != 1 || ans.KeyFindings[0] != "f1 [src_1]" {
+		t.Errorf("key_findings = %#v", ans.KeyFindings)
+	}
+	if len(ans.Limitations) != 1 {
+		t.Errorf("limitations = %#v", ans.Limitations)
+	}
+}
+
+func TestAgentSectionSynthesizerRejectsNonJSON(t *testing.T) {
+	model := &staticToolCallingModel{content: "not json at all"}
+	synth := NewAgentSectionSynthesizer(model)
+	_, err := synth.SynthesizeSection(context.Background(), SectionSynthesisInput{
+		Section: ResearchSection{ID: "s1"},
+	})
+	if err == nil {
+		t.Fatal("want error on non-JSON section answer")
+	}
+}
+
+func TestAgentSectionSynthesizerRejectsEmptyAnswer(t *testing.T) {
+	model := &staticToolCallingModel{content: `{"section_id":"s1","title":"S1"}`}
+	synth := NewAgentSectionSynthesizer(model)
+	_, err := synth.SynthesizeSection(context.Background(), SectionSynthesisInput{
+		Section: ResearchSection{ID: "s1"},
+	})
+	if err == nil {
+		t.Fatal("want error on empty section answer (no summary/findings/limitations)")
+	}
+}
