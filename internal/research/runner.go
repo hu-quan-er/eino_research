@@ -57,9 +57,11 @@ type RunnerConfig struct {
 // 推荐路径是先调用 Plan 得到可确认的 ResearchTodoPlan，再调用 Execute 执行；Run 是这两个
 // 阶段的便捷组合，适合不需要人工确认 plan 的调用方。
 type Runner struct {
+	// cfg 保存 workflow 依赖和预算；Runner 方法不会修改调用方传入的原始配置。
 	cfg RunnerConfig
 }
 
+// researchTodoPlanToolName 是 planner 强制调用的 tool 名称，必须与 researchTodoPlanToolInfo 保持一致。
 const researchTodoPlanToolName = "create_research_todo_plan"
 
 // NewRunner 校验必需依赖并填充预算默认值。
@@ -289,6 +291,11 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 	result.SectionExecutions = groupTodoExecutionsBySection(plan, todoExecutions)
 	result.Sources = collectTodoExecutionSources(todoExecutions)
 	result.Documents = collectTodoExecutionDocuments(todoExecutions)
+
+	// 最终输出走三段式后处理：
+	// 1. FinalSynthesizer 负责跨 todo 的完整回答；
+	// 2. EvidenceBinder 把回答里的关键 claim 重新绑定到 source/chunk；
+	// 3. ClaimVerifier 根据绑定结果移除或降级无证据 claim。
 	bus.Emit(ctx, Event{Kind: EventFinalStarted, RunID: runID})
 	result.Answer = r.synthesizeFinalAnswer(ctx, FinalSynthesisInput{
 		Question:          question,
@@ -528,6 +535,8 @@ func researchTodoPlanToolInfo() *schema.ToolInfo {
 			Required: required,
 		}
 	}
+	// section/todo schema 与 ResearchTodoPlan JSON 字段保持一致；tool schema 只描述形状，
+	// 更强的依赖图和质量规则由 parseResearchTodoPlan 后续执行。
 	section := &schema.ParameterInfo{
 		Type: schema.Object,
 		SubParams: map[string]*schema.ParameterInfo{

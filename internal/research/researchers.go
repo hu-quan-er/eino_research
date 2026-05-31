@@ -140,6 +140,8 @@ Return only a JSON ResearcherResult object.`, in.Question, stepPrompt, string(ex
 
 	var result ResearcherResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		// 非 JSON 输出通常是模型格式漂移，不等同于工具或系统失败；包装为 finding 后，
+		// 上层 synthesizer 还能综合其中的自然语言内容。
 		return ResearcherResult{
 			Role:  r.role,
 			Focus: r.focus,
@@ -208,6 +210,7 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 		}, nil
 	}
 	if strings.TrimSpace(out.Step.Question) == "" && strings.TrimSpace(out.Step.Title) == "" {
+		// 模型可能省略 step 字段；保留输入 step 让后续 todo 转换仍能定位来源任务。
 		out.Step = in.Step
 	}
 	if len(out.ResearcherResults) == 0 {
@@ -255,6 +258,7 @@ func normalizeResearcherSources(results []ResearcherResult) ([]ResearcherResult,
 	nextID := 1
 
 	for i, result := range results {
+		// 每个 researcher 独立返回局部 sources，因此这里为当前 result 建一张 oldID -> newID 映射。
 		idMap := make(map[string]string)
 		sourceOut := make([]search.Source, 0, len(result.Sources))
 		for _, source := range result.Sources {

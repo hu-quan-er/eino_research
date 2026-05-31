@@ -27,6 +27,9 @@ func RankSources(query string, sources []Source) []Source {
 	return out
 }
 
+// scoreSource 给单个来源打分并返回可审计的原因列表。
+//
+// 分数是启发式相对值，只用于当前搜索结果集内排序；不要把它解释成绝对可信度。
 func scoreSource(query string, source Source) (float64, string) {
 	score := 1.0
 	reasons := []string{"base"}
@@ -69,6 +72,10 @@ func scoreSource(query string, source Source) (float64, string) {
 	return score, strings.Join(reasons, ",")
 }
 
+// isOfficialLikeSource 判断来源是否像官方文档或开发者文档。
+//
+// 同时看 host/path/title/snippet，是为了覆盖 docs.example.com、example.com/docs
+// 以及标题里带 official documentation 的搜索结果。
 func isOfficialLikeSource(host, path string, source Source) bool {
 	text := strings.ToLower(source.Title + " " + source.Snippet + " " + source.URL)
 	return strings.HasPrefix(host, "docs.") ||
@@ -80,6 +87,7 @@ func isOfficialLikeSource(host, path string, source Source) bool {
 		strings.Contains(text, "developer documentation")
 }
 
+// isScholarlySource 判断 host 是否属于常见论文、学术出版或学术搜索站点。
 func isScholarlySource(host string) bool {
 	for _, domain := range []string{
 		"arxiv.org",
@@ -99,6 +107,7 @@ func isScholarlySource(host string) bool {
 	return false
 }
 
+// isStandardsOrPublicSource 判断 host 是否属于标准组织、政府或教育机构。
 func isStandardsOrPublicSource(host string) bool {
 	if strings.HasSuffix(host, ".gov") || strings.HasSuffix(host, ".edu") {
 		return true
@@ -116,6 +125,7 @@ func isStandardsOrPublicSource(host string) bool {
 	return false
 }
 
+// tokenOverlap 统计 query token 与候选文本 token 的交集大小。
 func tokenOverlap(query, text string) int {
 	queryTokens := rankTokens(query)
 	if len(queryTokens) == 0 {
@@ -134,6 +144,9 @@ func tokenOverlap(query, text string) int {
 	return overlap
 }
 
+// rankTokens 提取用于 rank overlap 的去重 token。
+//
+// 过滤短词和停用词可以降低 URL、冠词、介词对排序的噪音。
 func rankTokens(text string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
@@ -154,6 +167,7 @@ func rankTokens(text string) []string {
 	return tokens
 }
 
+// isRankStopword 判断 rank token 是否是低信息量英文停用词。
 func isRankStopword(token string) bool {
 	switch token {
 	case "the", "and", "for", "with", "from", "that", "this", "into", "what", "when", "where", "why", "how", "can", "should", "would", "could":

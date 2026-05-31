@@ -199,39 +199,66 @@ func buildFinalSynthesisContext(in FinalSynthesisInput) finalSynthesisContext {
 	}
 }
 
+// finalSynthesisContext 是给最终综合模型的压缩上下文。
 type finalSynthesisContext struct {
-	Question  string                         `json:"question"`
-	Objective string                         `json:"objective"`
-	Sections  []finalSectionSynthesisContext `json:"sections"`
-	Sources   []search.Source                `json:"sources"`
-	Documents []SourceDocument               `json:"documents,omitempty"`
+	// Question 是用户原始问题，提示模型保持回答范围和语言一致。
+	Question string `json:"question"`
+	// Objective 是 planner 提炼出的全局目标，比原问题更适合作为跨 todo 汇总轴。
+	Objective string `json:"objective"`
+	// Sections 是按报告章节压缩后的 todo 结果。
+	Sections []finalSectionSynthesisContext `json:"sections"`
+	// Sources 是最终去重后的来源元数据，用于模型写内联 source id。
+	Sources []search.Source `json:"sources"`
+	// Documents 是可引用正文切片，用于模型核对 quote 和避免编造事实。
+	Documents []SourceDocument `json:"documents,omitempty"`
 }
 
+// finalSectionSynthesisContext 是单个 section 的压缩上下文。
 type finalSectionSynthesisContext struct {
-	ID      string                      `json:"id"`
-	Title   string                      `json:"title"`
-	Summary string                      `json:"summary"`
-	Todos   []finalTodoSynthesisContext `json:"todos"`
+	// ID 是 section 稳定标识。
+	ID string `json:"id"`
+	// Title 是 section 展示标题。
+	Title string `json:"title"`
+	// Summary 是该 section 的确定性摘要，来自 todo summaries 拼接。
+	Summary string `json:"summary"`
+	// Todos 是 section 下每个 todo 的压缩执行结果。
+	Todos []finalTodoSynthesisContext `json:"todos"`
 }
 
+// finalTodoSynthesisContext 是单个 todo 的压缩执行快照。
 type finalTodoSynthesisContext struct {
-	ID                 string                    `json:"id"`
-	Title              string                    `json:"title"`
-	Question           string                    `json:"question"`
-	AcceptanceCriteria []string                  `json:"acceptance_criteria,omitempty"`
-	Status             TodoStatus                `json:"status"`
-	Summary            string                    `json:"summary"`
-	Findings           []Finding                 `json:"findings,omitempty"`
-	Gaps               []string                  `json:"gaps,omitempty"`
-	Error              string                    `json:"error,omitempty"`
-	ResearcherResults  []finalResearcherSnapshot `json:"researcher_results,omitempty"`
+	// ID 是 todo 稳定标识，用于最终答案引用和问题定位。
+	ID string `json:"id"`
+	// Title 是 todo 展示标题。
+	Title string `json:"title"`
+	// Question 是该 todo 具体回答的问题。
+	Question string `json:"question"`
+	// AcceptanceCriteria 是 planner 给出的完成标准，帮助最终综合判断覆盖是否足够。
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
+	// Status 是调度器给出的终态。
+	Status TodoStatus `json:"status"`
+	// Summary 是 todo 内 synthesizer 的综合结果。
+	Summary string `json:"summary"`
+	// Findings 是该 todo 的扁平化证据发现。
+	Findings []Finding `json:"findings,omitempty"`
+	// Gaps 是 todo 仍未解决的证据或问题缺口。
+	Gaps []string `json:"gaps,omitempty"`
+	// Error 是 failed/blocked/skipped 的原因。
+	Error string `json:"error,omitempty"`
+	// ResearcherResults 保留角色视角和局部错误，但移除重复 sources 以控制上下文体积。
+	ResearcherResults []finalResearcherSnapshot `json:"researcher_results,omitempty"`
 }
 
+// finalResearcherSnapshot 是最终综合阶段保留的 researcher 轻量快照。
 type finalResearcherSnapshot struct {
-	Role     string    `json:"role"`
-	Focus    string    `json:"focus"`
+	// Role 是 researcher 角色 ID。
+	Role string `json:"role"`
+	// Focus 是该角色的研究范围。
+	Focus string `json:"focus"`
+	// Findings 是该角色贡献的判断和证据引用。
 	Findings []Finding `json:"findings,omitempty"`
-	Errors   []string  `json:"errors,omitempty"`
+	// Errors 是该角色局部失败信息。
+	Errors []string `json:"errors,omitempty"`
 }
 
 // compactResearcherResults 保留最终综合需要的 researcher 视角、发现和错误，去掉重复 sources。
@@ -248,6 +275,7 @@ func compactResearcherResults(results []ResearcherResult) []finalResearcherSnaps
 	return out
 }
 
+// isEmptyAnswer 判断模型是否返回了语法合法但业务上空的 Answer。
 func isEmptyAnswer(answer Answer) bool {
 	return strings.TrimSpace(answer.Markdown) == "" &&
 		strings.TrimSpace(answer.Summary) == "" &&
@@ -255,10 +283,12 @@ func isEmptyAnswer(answer Answer) bool {
 		len(trimNonEmptyStrings(answer.Limitations)) == 0
 }
 
+// completedTodosSummary 生成兜底 summary，主要用于最终综合失败时仍能展示执行进展。
 func completedTodosSummary(executions []TodoExecution) string {
 	return fmt.Sprintf("Completed %d todo(s).", countTodoStatus(executions, TodoDone))
 }
 
+// collectTopFindingClaims 从 todo findings 中抽取前 N 条不同 claim 作为兜底 key findings。
 func collectTopFindingClaims(executions []TodoExecution, limit int) []string {
 	if limit <= 0 {
 		return nil
@@ -285,6 +315,7 @@ func collectTopFindingClaims(executions []TodoExecution, limit int) []string {
 	return claims
 }
 
+// collectFinalLimitations 汇总 todo gaps 和失败原因，作为最终答案限制说明。
 func collectFinalLimitations(executions []TodoExecution) []string {
 	limitations := make([]string, 0)
 	for _, execution := range executions {
@@ -300,6 +331,7 @@ func collectFinalLimitations(executions []TodoExecution) []string {
 	return dedupeStrings(trimNonEmptyStrings(limitations))
 }
 
+// claimWithSourceIDs 把 source id 追加到 claim 后，保留最基本的 citation 可追踪性。
 func claimWithSourceIDs(claim string, sourceIDs []string) string {
 	sourceIDs = trimNonEmptyStrings(sourceIDs)
 	if len(sourceIDs) == 0 {
@@ -308,6 +340,9 @@ func claimWithSourceIDs(claim string, sourceIDs []string) string {
 	return claim + " [" + strings.Join(sourceIDs, ", ") + "]"
 }
 
+// buildFallbackFinalMarkdown 用结构化 Answer 构造 Markdown 正文。
+//
+// 该路径只在模型无正文或最终综合失败时使用，目标是保留已有研究成果而不是追求文采。
 func buildFallbackFinalMarkdown(in FinalSynthesisInput, answer Answer) string {
 	var sb strings.Builder
 	sb.WriteString("# Research Report\n\n")
@@ -354,6 +389,7 @@ func buildFallbackFinalMarkdown(in FinalSynthesisInput, answer Answer) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// firstNonEmptyLine 从 Markdown/纯文本中提取第一条可用摘要。
 func firstNonEmptyLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
@@ -364,6 +400,7 @@ func firstNonEmptyLine(text string) string {
 	return ""
 }
 
+// trimNonEmptyStrings 清理字符串数组，去掉空白项但保留原顺序。
 func trimNonEmptyStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -374,6 +411,7 @@ func trimNonEmptyStrings(values []string) []string {
 	return out
 }
 
+// todoSummaryTitleForAnswer 为 limitations 选择可读 todo 标题。
 func todoSummaryTitleForAnswer(todo ResearchTodo) string {
 	if title := strings.TrimSpace(todo.Title); title != "" {
 		return title

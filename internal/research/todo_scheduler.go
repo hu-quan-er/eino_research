@@ -50,9 +50,12 @@ type TodoSchedulerConfig struct {
 //
 // 它保证依赖先于被依赖 todo 执行；独立分支可以并发；失败依赖会让下游 todo 进入 blocked。
 type TodoScheduler struct {
+	// maxParallel 限制每一批 runnable todo 的并发数量。
 	maxParallel int
-	executor    TodoExecutor
-	replanner   TodoReplanner
+	// executor 是单个 todo 的执行函数，默认由 Runner.executeTodo 提供。
+	executor TodoExecutor
+	// replanner 在失败后可返回 plan patch；为空时失败只会阻塞下游依赖。
+	replanner TodoReplanner
 }
 
 // NewTodoScheduler 创建调度器，并为 MaxParallel 填充默认值。
@@ -140,6 +143,8 @@ func (s *TodoScheduler) Run(ctx context.Context, plan ResearchTodoPlan) ([]TodoE
 }
 
 // runBatch 并发执行一批当前 runnable 的 todos。
+//
+// results 切片按 runnable 输入顺序写入，避免 goroutine 完成顺序影响 scheduler 后续处理。
 func (s *TodoScheduler) runBatch(ctx context.Context, plan ResearchTodoPlan, todos []ResearchTodo, completed map[string]TodoExecution) []TodoExecution {
 	results := make([]TodoExecution, len(todos))
 	var wg sync.WaitGroup
@@ -217,6 +222,8 @@ func (s *TodoScheduler) replanAfterFailure(ctx context.Context, plan ResearchTod
 }
 
 // runnableTodos 按 plan 顺序选择依赖已完成的 pending todo，并受 limit 限制。
+//
+// 保持 plan 顺序能让同一批可执行 todo 的调度更可预测，也方便测试断言。
 func runnableTodos(plan ResearchTodoPlan, pending map[string]ResearchTodo, completed map[string]TodoExecution, limit int) []ResearchTodo {
 	out := make([]ResearchTodo, 0, limit)
 	for _, todo := range plan.Todos {
@@ -236,6 +243,8 @@ func runnableTodos(plan ResearchTodoPlan, pending map[string]ResearchTodo, compl
 }
 
 // blockTodosWithTerminalDependencies 递归标记依赖失败/跳过/blocked 的下游 todo。
+//
+// 这里使用循环传播，因为一个新 blocked todo 可能继续让更下游 todo 变成 blocked。
 func blockTodosWithTerminalDependencies(plan ResearchTodoPlan, pending map[string]ResearchTodo, completed map[string]TodoExecution) []TodoExecution {
 	var blocked []TodoExecution
 	for {
@@ -291,6 +300,8 @@ func todoHasTerminalFailedDependency(todo ResearchTodo, completed map[string]Tod
 }
 
 // dependencyExecutions 按 todo.DependsOn 顺序取出已完成的依赖结果。
+//
+// 只传直接依赖，避免当前 todo prompt 混入无关并行分支的上下文。
 func dependencyExecutions(todo ResearchTodo, completed map[string]TodoExecution) []TodoExecution {
 	out := make([]TodoExecution, 0, len(todo.DependsOn))
 	for _, dep := range todo.DependsOn {

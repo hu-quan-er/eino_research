@@ -31,7 +31,9 @@ func (e ToolEmitFunc) safe(ctx context.Context, ev Event) {
 // ToolOption 是 NewWebSearchTool / NewWebFetchTool 的可选参数。
 type ToolOption func(*toolOptions)
 
+// toolOptions 是工具构造函数内部使用的可选参数集合。
 type toolOptions struct {
+	// emit 是工具成功调用后的事件回调；为空时工具不发事件。
 	emit ToolEmitFunc
 }
 
@@ -40,6 +42,7 @@ func WithToolEmit(emit ToolEmitFunc) ToolOption {
 	return func(o *toolOptions) { o.emit = emit }
 }
 
+// applyToolOptions 把可选参数合并成内部配置。
 func applyToolOptions(opts []ToolOption) toolOptions {
 	out := toolOptions{}
 	for _, opt := range opts {
@@ -311,6 +314,7 @@ func extractReadableText(contentType, body string) (string, string) {
 		if n.Type == html.ElementNode {
 			name := strings.ToLower(n.Data)
 			if name == "script" || name == "style" || name == "noscript" || name == "svg" {
+				// 这些节点通常不是正文内容，跳过能减少脚本、样式和图形文本污染 quote。
 				skip = true
 			}
 			if name == "title" {

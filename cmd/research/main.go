@@ -18,10 +18,12 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
+// main 将进程退出码交给可测试的 run 函数决定。
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// CLI 级替换点集中放在这里，测试可以替换模型创建和 stdin 判定而不改 run 主体。
 var (
 	// newOpenAICompatibleModel 和 stdinIsInteractive 是测试替换点，避免 CLI 测试真的创建模型或
 	// 依赖真实终端。
@@ -34,6 +36,8 @@ var (
 // 它负责解析 flag、加载配置、创建 provider/model/runner，并根据 --plan-only、--yes、
 // output.format 等选项决定只预览 plan 还是完整执行。
 func run(args []string) int {
+	// CLI 入口保持 thin orchestration：flag/config/model/provider/runner 都在这里装配，
+	// 具体 research 逻辑全部下沉到 internal/research，方便单元测试替换依赖。
 	fs := flag.NewFlagSet("research", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {
@@ -99,10 +103,12 @@ func run(args []string) int {
 		return 2
 	}
 	if *planJSON && !*planOnly {
+		// --plan-json 只描述 planner 输出，不执行研究；允许与完整执行混用会让输出语义不清。
 		fmt.Fprintln(os.Stderr, "--plan-json requires --plan-only")
 		return 2
 	}
 	if !*yes && !*planOnly && !stdinIsInteractive() {
+		// 非交互场景没有用户确认机会，必须显式选择直接执行或只生成计划。
 		fmt.Fprintln(os.Stderr, "non-interactive execution requires --yes or --plan-only")
 		return 2
 	}
@@ -114,6 +120,7 @@ func run(args []string) int {
 	searchName := cfg.Search.Provider
 	switch cfg.Search.Provider {
 	case "mock":
+		// mock provider 只替代搜索层，模型调用仍是真实配置的 OpenAI-compatible 模型。
 		sp = search.NewMockProvider()
 	case "google":
 		sp = search.NewGoogleProvider(search.GoogleConfig{
@@ -171,6 +178,7 @@ func run(args []string) int {
 	}
 
 	if *planOnly {
+		// plan-only 是 CLI 的显式跳转分支：生成计划后立即返回，不构造最终 ResearchResult。
 		if *planJSON {
 			out, err := json.MarshalIndent(plan, "", "  ")
 			if err != nil {
@@ -186,6 +194,7 @@ func run(args []string) int {
 
 	fmt.Fprint(os.Stderr, renderTodoPlanPreview(plan))
 	if !*yes {
+		// 默认交互路径先展示计划再确认，避免模型 planner 生成不符合预期的任务后直接开跑。
 		confirmed, err := confirmPlanExecution()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "confirmation error: %v\n", err)
@@ -198,6 +207,7 @@ func run(args []string) int {
 
 	result, err := runner.Execute(ctx, question, plan)
 	if err != nil {
+		// Execute 可能返回部分 result；JSON 模式下仍输出结构化错误，便于上游系统读取。
 		if result.Error == nil {
 			result.Error = &research.RunError{Stage: "run", Message: err.Error()}
 		}

@@ -14,9 +14,13 @@ import (
 // Go duration 字符串。对外的 Config 仍保存解析后的 time.Duration，避免 YAML
 // 解析细节污染业务代码。
 type Duration struct {
+	// Duration 是解析后的标准库 duration，业务层只读取这个值。
 	time.Duration
 }
 
+// UnmarshalYAML 从 YAML 标量解析 Go duration 字符串。
+//
+// 这里要求配置写成 "60s"、"2m" 这类标准格式，避免把单位拆散到多个字段。
 func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	var raw string
 	if err := value.Decode(&raw); err != nil {
@@ -30,6 +34,7 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// MarshalYAML 把 duration 重新输出成人类可读字符串，便于后续生成示例配置。
 func (d Duration) MarshalYAML() (any, error) {
 	return d.String(), nil
 }
@@ -201,11 +206,16 @@ func (m *ModelConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	type rawModelConfig struct {
-		Provider string   `yaml:"provider"`
-		APIKey   string   `yaml:"api_key"`
-		Model    string   `yaml:"model"`
-		BaseURL  string   `yaml:"base_url"`
-		Timeout  Duration `yaml:"timeout"`
+		// Provider 保留现有值，未在 YAML 中出现时不会覆盖 Defaults。
+		Provider string `yaml:"provider"`
+		// APIKey 可由文件提供，也可被 OPENAI_API_KEY 覆盖。
+		APIKey string `yaml:"api_key"`
+		// Model 可由文件提供，也可被 OPENAI_MODEL 覆盖。
+		Model string `yaml:"model"`
+		// BaseURL 可指向兼容 OpenAI API 的代理或本地服务。
+		BaseURL string `yaml:"base_url"`
+		// Timeout 使用自定义 Duration 解析 YAML 字符串。
+		Timeout Duration `yaml:"timeout"`
 	}
 
 	raw := rawModelConfig{
@@ -266,23 +276,28 @@ func applyOverrides(cfg *Config, o Overrides) {
 
 // Validate 校验 YAML 解析本身无法表达的跨字段约束，例如 provider 专属凭据和结果数量限制。
 func (c Config) Validate() error {
+	// 模型层目前只实现 OpenAI-compatible，避免配置成未接入 provider 后运行时才失败。
 	if c.Model.Provider != "openai-compatible" {
 		return fmt.Errorf("unsupported model provider %q", c.Model.Provider)
 	}
 	if c.Model.Timeout <= 0 {
 		return errors.New("model.timeout must be positive")
 	}
+	// 搜索 provider 会影响凭据要求和返回数量限制，因此必须先判定 provider 类型。
 	if c.Search.Provider != "mock" && c.Search.Provider != "google" {
 		return fmt.Errorf("unsupported search provider %q", c.Search.Provider)
 	}
 	if c.Search.Provider == "google" {
+		// Google provider 需要两项凭据；可以来自配置文件，也可以来自环境变量。
 		if c.Search.Google.APIKey == "" || c.Search.Google.CSEID == "" {
 			return errors.New("google search requires GOOGLE_API_KEY and GOOGLE_CSE_ID or config search.google credentials")
 		}
+		// Google Custom Search API 的 num 参数上限是 10，提前拒绝更清晰。
 		if c.Search.ResultsPerSearch > 10 {
 			return errors.New("search.results_per_search must be <= 10 for google provider")
 		}
 	}
+	// 输出格式和预算字段是跨模块共享契约，必须在进入 cmd/research 主流程前收敛。
 	if c.Output.Format != "markdown" && c.Output.Format != "json" {
 		return fmt.Errorf("unsupported output format %q", c.Output.Format)
 	}

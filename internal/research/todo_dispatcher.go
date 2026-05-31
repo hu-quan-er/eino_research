@@ -123,6 +123,10 @@ func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoRes
 	return deriveTodoResearchRoles(todo, plan, nil)
 }
 
+// deriveTodoResearchRoles 是派发规则核心。
+//
+// 跳转逻辑：先识别 synthesis todo 走专用综合/查漏路径；普通 todo 先加入基础证据角色，
+// 再根据关键词和依赖结果追加 freshness/implementation/comparison/quantitative/gap 等角色。
 func deriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan, dependencies []TodoExecution) []TodoResearchRole {
 	if isSynthesisTodo(todo) {
 		return []TodoResearchRole{
@@ -195,6 +199,7 @@ func deriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan, dependenc
 	return roles
 }
 
+// appendTodoResearchRole 追加角色并按 Role.ID 去重，避免关键词命中多个规则时重复派发。
 func appendTodoResearchRole(roles []TodoResearchRole, role TodoResearchRole) []TodoResearchRole {
 	for _, existing := range roles {
 		if existing.ID == role.ID {
@@ -204,6 +209,9 @@ func appendTodoResearchRole(roles []TodoResearchRole, role TodoResearchRole) []T
 	return append(roles, role)
 }
 
+// todoNeedsBackground 判断是否需要 background_researcher。
+//
+// 没有依赖结果的首批 todo 默认需要背景角色；已有依赖时只有明确背景/概念关键词才追加。
 func todoNeedsBackground(todo ResearchTodo, plan ResearchTodoPlan, dependencies []TodoExecution) bool {
 	if len(dependencies) == 0 {
 		return true
@@ -244,6 +252,7 @@ func todoNeedsFreshness(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	})
 }
 
+// todoNeedsImplementationFocus 判断 todo 是否偏工程实现、API、配置或代码集成。
 func todoNeedsImplementationFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
 		"api",
@@ -266,6 +275,7 @@ func todoNeedsImplementationFocus(todo ResearchTodo, plan ResearchTodoPlan) bool
 	})
 }
 
+// todoNeedsComparisonFocus 判断 todo 是否在做方案对比、差异分析或选型权衡。
 func todoNeedsComparisonFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
 		"alternative",
@@ -284,6 +294,7 @@ func todoNeedsComparisonFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	})
 }
 
+// todoNeedsQuantitativeFocus 判断 todo 是否需要性能、价格、指标等量化视角。
 func todoNeedsQuantitativeFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	return containsAnyDispatchKeyword(todoDispatchText(todo, plan), []string{
 		"adoption",
@@ -304,6 +315,9 @@ func todoNeedsQuantitativeFocus(todo ResearchTodo, plan ResearchTodoPlan) bool {
 	})
 }
 
+// dependenciesHaveGaps 判断依赖 todo 是否留下 gap/error/非 done 状态。
+//
+// 命中后会追加 gap_checker，让当前 todo 优先补齐前置研究留下的问题。
 func dependenciesHaveGaps(dependencies []TodoExecution) bool {
 	for _, dependency := range dependencies {
 		if len(dependency.Gaps) > 0 || strings.TrimSpace(dependency.Error) != "" || dependency.Status != TodoDone {
@@ -313,6 +327,7 @@ func dependenciesHaveGaps(dependencies []TodoExecution) bool {
 	return false
 }
 
+// todoDispatchText 汇总 plan objective 和 todo 文本，作为关键词规则的匹配输入。
 func todoDispatchText(todo ResearchTodo, plan ResearchTodoPlan) string {
 	return normalizeLintText(strings.Join([]string{
 		plan.Objective,
@@ -323,6 +338,7 @@ func todoDispatchText(todo ResearchTodo, plan ResearchTodoPlan) string {
 	}, " "))
 }
 
+// containsAnyDispatchKeyword 判断归一化文本是否包含任一派发关键词。
 func containsAnyDispatchKeyword(text string, keywords []string) bool {
 	for _, keyword := range keywords {
 		if strings.Contains(text, normalizeLintText(keyword)) {
@@ -333,6 +349,9 @@ func containsAnyDispatchKeyword(text string, keywords []string) bool {
 }
 
 // todoToResearchStep 把当前主流程的 ResearchTodo 转换为可复用执行器需要的 ResearchStep。
+//
+// 转换时会调用 ExpandTodoSearchQueries，把 planner 的原始 query 和规则扩展 query 一起
+// 交给 researcher，避免 planner 缺少某类搜索角度时第一轮覆盖不足。
 func todoToResearchStep(todo ResearchTodo, plans ...ResearchTodoPlan) ResearchStep {
 	title := strings.TrimSpace(todo.Title)
 	if title == "" {

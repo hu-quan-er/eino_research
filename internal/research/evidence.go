@@ -7,8 +7,11 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
+// 证据切片和 quote 的默认长度，统一放在这里避免渲染、绑定和归一化各自定义。
 const (
-	defaultSourceChunkChars   = 900
+	// defaultSourceChunkChars 是从 source/snippet/fetched page 构造 chunk 时的默认 rune 上限。
+	defaultSourceChunkChars = 900
+	// defaultEvidenceQuoteChars 是自动生成 evidence quote 时的默认 rune 上限。
 	defaultEvidenceQuoteChars = 240
 )
 
@@ -278,6 +281,9 @@ func mergeSourceDocuments(primary, fallback []SourceDocument) []SourceDocument {
 }
 
 // dedupeSourceDocuments 按 SourceID 去重；没有 SourceID 时按 URL 去重。
+//
+// 保留第一次出现的 document，配合 mergeSourceDocuments 的 primary/fallback 顺序实现
+// “fetch 正文优先，snippet document 兜底”的效果。
 func dedupeSourceDocuments(documents []SourceDocument) []SourceDocument {
 	seen := make(map[string]struct{}, len(documents))
 	out := make([]SourceDocument, 0, len(documents))

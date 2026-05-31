@@ -5,6 +5,7 @@ import "github.com/hu-quan-er/eino_research/internal/search"
 // TodoStatus 表示单个 todo 的终态或中间态。
 type TodoStatus string
 
+// TodoStatus 的取值覆盖调度生命周期中的中间态和终态。
 const (
 	// TodoPending 表示 todo 尚未被调度执行。
 	TodoPending TodoStatus = "pending"

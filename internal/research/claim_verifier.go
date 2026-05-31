@@ -78,6 +78,10 @@ func (r *Runner) verifyFinalClaims(ctx context.Context, in ClaimVerificationInpu
 	return answer
 }
 
+// removeUnsupportedKeyFindings 从结构化关键发现中删除已确认无证据支撑的 claim。
+//
+// Markdown 正文暂不自动重写，避免规则层误删自然语言段落；unsupported 信息会出现在
+// Answer.Evidence 和 Limitations 中。
 func removeUnsupportedKeyFindings(findings []string, unsupported map[string]ClaimEvidence) []string {
 	out := make([]string, 0, len(findings))
 	for _, finding := range findings {
@@ -90,6 +94,7 @@ func removeUnsupportedKeyFindings(findings []string, unsupported map[string]Clai
 	return out
 }
 
+// claimEvidenceIsWeak 判断 claim 是否只有 source-level 引用而没有 chunk/quote。
 func claimEvidenceIsWeak(evidence ClaimEvidence) bool {
 	if len(evidence.EvidenceRefs) == 0 {
 		return true
@@ -102,6 +107,7 @@ func claimEvidenceIsWeak(evidence ClaimEvidence) bool {
 	return true
 }
 
+// normalizedClaimKey 生成 claim 比较 key，用于把 evidence 结果映射回 KeyFindings。
 func normalizedClaimKey(claim string) string {
 	claim = stripCitationText(claim)
 	claim = strings.TrimSpace(strings.ToLower(claim))

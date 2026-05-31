@@ -86,6 +86,10 @@ func DeduplicateStable(in []Source) []Source {
 	return out
 }
 
+// stableSourceID 在保留原始 ID 和生成 src_N 之间做折中。
+//
+// 如果 provider 或上游已经给出不冲突 ID，则继续使用它，避免已经存在的引用失效；
+// 如果为空或冲突，则按 next 分配新的 src_N。
 func stableSourceID(id string, used map[string]struct{}, next *int) string {
 	id = strings.TrimSpace(id)
 	if id != "" {

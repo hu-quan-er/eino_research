@@ -63,20 +63,30 @@ func (s *TraceStore) Snapshot() []Event {
 
 // BudgetReport 是 BudgetMeter 对一次 run 的聚合统计。
 type BudgetReport struct {
-	TodosCompleted   int            `json:"todos_completed"`
-	TodosFailed      int            `json:"todos_failed"`
-	ToolCalls        map[string]int `json:"tool_calls,omitempty"`
-	ModelCalls       int            `json:"model_calls"`
-	TokensIn         int            `json:"tokens_in"`
-	TokensOut        int            `json:"tokens_out"`
-	DurationMS       int64          `json:"duration_ms"`
-	ReflectionPasses int            `json:"reflection_passes"` // Phase 3 用，Phase 1 永远为 0
+	// TodosCompleted 是成功完成的 todo 数量。
+	TodosCompleted int `json:"todos_completed"`
+	// TodosFailed 是执行失败的 todo 数量；blocked/skipped 当前不计入失败数。
+	TodosFailed int `json:"todos_failed"`
+	// ToolCalls 按工具名统计成功工具调用次数。
+	ToolCalls map[string]int `json:"tool_calls,omitempty"`
+	// ModelCalls 是基于阶段完成事件估算的模型调用次数。
+	ModelCalls int `json:"model_calls"`
+	// TokensIn 预留给模型输入 token 统计。
+	TokensIn int `json:"tokens_in"`
+	// TokensOut 预留给模型输出 token 统计。
+	TokensOut int `json:"tokens_out"`
+	// DurationMS 是整次 run 总耗时；目前由携带 DurationMS 的 final.completed 覆盖。
+	DurationMS int64 `json:"duration_ms"`
+	// ReflectionPasses 预留给后续 reflection/review pass 统计，当前版本始终为 0。
+	ReflectionPasses int `json:"reflection_passes"` // Phase 3 用，Phase 1 永远为 0
 }
 
 // BudgetMeter 是把事件聚合为 BudgetReport 的 sink。
 // ToolCall/Synthesis/FinalCompleted 等事件会累加对应字段。
 type BudgetMeter struct {
-	mu     sync.Mutex
+	// mu 保护 report，多个事件可能由并发 todo 同时写入。
+	mu sync.Mutex
+	// report 保存当前累计值；Snapshot 会复制 map 后返回。
 	report BudgetReport
 }
 
@@ -125,8 +135,10 @@ func (m *BudgetMeter) Snapshot() BudgetReport {
 // JSONLinesSink 把每条事件序列化为一行 JSON 写到 io.Writer。
 // 内部 mutex 保证并发 emit 时不会出现行撕裂。
 type JSONLinesSink struct {
+	// mu 保证并发写入时一条 JSON 事件不会与另一条交错。
 	mu sync.Mutex
-	w  io.Writer
+	// w 是实际输出目标，通常是 stderr 或测试中的 bytes.Buffer。
+	w io.Writer
 }
 
 // NewJSONLinesSink 创建一个写到给定 writer 的 sink。w 为 nil 时退化为 os.Stderr。

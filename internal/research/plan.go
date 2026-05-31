@@ -17,7 +17,8 @@ type ResearchStep struct {
 	Question string `json:"question"`
 	// SearchQueries 是 researcher 的初始检索 query。
 	SearchQueries []string `json:"search_queries"`
-	// ResearchAxes 是建议 researcher 覆盖的分析角度。
+	// ResearchAxes 是建议 researcher 覆盖的分析角度；当前 todo-plan 主路径主要使用
+	// SearchQueries/SuccessCriteria，保留该字段是为了兼容更细粒度 step 执行器。
 	ResearchAxes []string `json:"research_axes,omitempty"`
 	// SuccessCriteria 是判断 step 是否完成的标准。
 	SuccessCriteria []string `json:"success_criteria"`

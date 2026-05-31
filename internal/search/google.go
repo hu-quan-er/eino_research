@@ -9,8 +9,11 @@ import (
 	"strconv"
 )
 
+// Google Custom Search provider 的 API 默认值和请求约束。
 const (
+	// defaultGoogleBaseURL 是 Google Custom Search JSON API 的生产地址。
 	defaultGoogleBaseURL = "https://www.googleapis.com/customsearch/v1"
+	// maxGoogleSearchLimit 是 Google API num 参数允许的最大值。
 	maxGoogleSearchLimit = 10
 )
 
@@ -30,10 +33,14 @@ type GoogleConfig struct {
 
 // GoogleProvider 基于 Google Custom Search JSON API 实现 Provider。
 type GoogleProvider struct {
-	apiKey  string
-	cseID   string
+	// apiKey 是请求中的 key 参数。
+	apiKey string
+	// cseID 是请求中的 cx 参数。
+	cseID string
+	// baseURL 是 Custom Search JSON API 地址，可在测试中替换。
 	baseURL string
-	client  *http.Client
+	// client 发起 HTTP 请求；nil 不会出现，因为构造函数会填默认值。
+	client *http.Client
 }
 
 // NewGoogleProvider 创建 GoogleProvider，并在未显式传入 BaseURL/Client 时使用生产默认值。
@@ -111,12 +118,18 @@ func (p *GoogleProvider) Search(ctx context.Context, query string, limit int) ([
 	return sources, nil
 }
 
+// googleSearchResponse 是当前代码关心的 Google API 响应子集。
 type googleSearchResponse struct {
+	// Items 是 Google API 返回的搜索结果数组；没有结果时为空。
 	Items []googleSearchItem `json:"items"`
 }
 
+// googleSearchItem 是 Google API 单条搜索结果的最小字段集。
 type googleSearchItem struct {
-	Title   string `json:"title"`
-	Link    string `json:"link"`
+	// Title 是搜索结果标题。
+	Title string `json:"title"`
+	// Link 是结果 URL。
+	Link string `json:"link"`
+	// Snippet 是结果摘要。
 	Snippet string `json:"snippet"`
 }

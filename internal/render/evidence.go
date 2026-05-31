@@ -7,6 +7,7 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
+// maxRenderedEvidenceQuoteChars 限制 Markdown 中单条证据 quote 的长度，避免列表项过长。
 const maxRenderedEvidenceQuoteChars = 360
 
 // appendFindingsAndEvidence 按 todo 输出 findings 和对应证据。
@@ -117,6 +118,7 @@ func buildEvidenceIndex(result research.ResearchResult) evidenceIndex {
 		sourceID := strings.TrimSpace(document.SourceID)
 		if sourceID != "" {
 			if _, ok := index.documentBySourceID[sourceID]; !ok {
+				// 同一 source 可能同时有 fetched document 和 snippet document；保留第一个与上游优先级一致。
 				index.documentBySourceID[sourceID] = document
 			}
 		}

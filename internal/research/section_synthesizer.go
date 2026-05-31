@@ -48,6 +48,7 @@ type SectionAnswer struct {
 
 // AgentSectionSynthesizer 使用模型把单个 section 归纳为 SectionAnswer。
 type AgentSectionSynthesizer struct {
+	// model 是执行 section-level synthesis 的 chat model。
 	model model.BaseChatModel
 }
 
@@ -166,23 +167,40 @@ func buildSectionSynthesisContext(in SectionSynthesisInput) sectionSynthesisCont
 	}
 }
 
+// sectionSynthesisContext 是传给 section synthesizer 模型的压缩上下文。
 type sectionSynthesisContext struct {
-	Question    string               `json:"question"`
-	Objective   string               `json:"objective"`
-	SectionID   string               `json:"section_id"`
-	Title       string               `json:"title"`
-	Description string               `json:"description,omitempty"`
-	Todos       []sectionTodoContext `json:"todos"`
-	Documents   []SourceDocument     `json:"documents,omitempty"`
+	// Question 是用户原始问题。
+	Question string `json:"question"`
+	// Objective 是全局研究目标。
+	Objective string `json:"objective"`
+	// SectionID 是当前 section 的稳定 ID。
+	SectionID string `json:"section_id"`
+	// Title 是当前 section 标题。
+	Title string `json:"title"`
+	// Description 是 planner 给出的 section 范围说明。
+	Description string `json:"description,omitempty"`
+	// Todos 是当前 section 下的压缩 todo 结果。
+	Todos []sectionTodoContext `json:"todos"`
+	// Documents 是当前 section 可引用正文。
+	Documents []SourceDocument `json:"documents,omitempty"`
 }
 
+// sectionTodoContext 是 section synthesis 阶段保留的 todo 轻量快照。
 type sectionTodoContext struct {
-	ID       string     `json:"id"`
-	Title    string     `json:"title"`
-	Question string     `json:"question"`
-	Status   TodoStatus `json:"status"`
-	Summary  string     `json:"summary"`
-	Findings []Finding  `json:"findings,omitempty"`
-	Gaps     []string   `json:"gaps,omitempty"`
-	Error    string     `json:"error,omitempty"`
+	// ID 是 todo 稳定标识。
+	ID string `json:"id"`
+	// Title 是 todo 标题。
+	Title string `json:"title"`
+	// Question 是 todo 要回答的具体问题。
+	Question string `json:"question"`
+	// Status 是 todo 调度终态。
+	Status TodoStatus `json:"status"`
+	// Summary 是 todo 内 synthesizer 的摘要。
+	Summary string `json:"summary"`
+	// Findings 是该 todo 的证据发现。
+	Findings []Finding `json:"findings,omitempty"`
+	// Gaps 是该 todo 未解决的问题。
+	Gaps []string `json:"gaps,omitempty"`
+	// Error 是 failed/blocked/skipped 的可读原因。
+	Error string `json:"error,omitempty"`
 }

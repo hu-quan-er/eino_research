@@ -2,6 +2,7 @@ package research
 
 import "strings"
 
+// defaultExpandedSearchQueries 限制扩展后的初始 query 数量，控制 researcher prompt 长度。
 const defaultExpandedSearchQueries = 8
 
 // ExpandTodoSearchQueries 为 todo 生成 researcher 初始检索 query 列表。
@@ -38,6 +39,10 @@ func ExpandTodoSearchQueries(todo ResearchTodo, plan ResearchTodoPlan) []string 
 	return limitStrings(dedupeStrings(queries), defaultExpandedSearchQueries)
 }
 
+// firstNonEmptyQuery 按优先级从字符串或字符串数组中取第一个非空值。
+//
+// 用 any 是为了让调用处可以自然传入 search_queries、question、title、objective，
+// 同时保持“第一个有效上下文作为 topic”的规则集中在一个函数里。
 func firstNonEmptyQuery(values ...any) string {
 	for _, value := range values {
 		switch v := value.(type) {
@@ -56,6 +61,9 @@ func firstNonEmptyQuery(values ...any) string {
 	return ""
 }
 
+// compactQueryText 把 query topic 压缩到适合搜索框的长度。
+//
+// 截断按 rune 计算，避免中文等多字节字符被截坏。
 func compactQueryText(value string) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
@@ -65,6 +73,7 @@ func compactQueryText(value string) string {
 	return string(runes[:120])
 }
 
+// limitStrings 保留前 limit 个字符串；limit <= 0 表示不截断。
 func limitStrings(values []string, limit int) []string {
 	if limit <= 0 || len(values) <= limit {
 		return values

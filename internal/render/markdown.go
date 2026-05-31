@@ -13,6 +13,7 @@ import (
 // 结构化字段生成标准报告。
 func Markdown(result research.ResearchResult) string {
 	if result.Answer.Markdown != "" {
+		// FinalSynthesizer 已经产出正文时，不重写主报告，只追加可审计的执行和证据附录。
 		var sb strings.Builder
 		sb.WriteString(strings.TrimSpace(result.Answer.Markdown))
 		sb.WriteString("\n\n")
@@ -23,6 +24,7 @@ func Markdown(result research.ResearchResult) string {
 		return strings.TrimSpace(sb.String()) + "\n"
 	}
 
+	// 没有模型正文时，从结构化 Answer 字段生成标准模板，保证 CLI 仍有可读输出。
 	var sb strings.Builder
 	sb.WriteString("# Research Report\n\n")
 	sb.WriteString("## Question\n\n")

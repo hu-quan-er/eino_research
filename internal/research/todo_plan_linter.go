@@ -5,8 +5,11 @@ import (
 	"strings"
 )
 
+// PlanIssue severity 常量，供 linter、测试和未来 UI 做稳定判断。
 const (
-	PlanIssueError   = "error"
+	// PlanIssueError 表示阻断执行的 plan 质量问题。
+	PlanIssueError = "error"
+	// PlanIssueWarning 预留给非阻断提示，当前 lint 主要返回 error。
 	PlanIssueWarning = "warning"
 )
 
@@ -32,6 +35,7 @@ type PlanLintError struct {
 	Issues []PlanIssue
 }
 
+// Error 把 lint issues 拼成人类可读错误，同时保留 code/path 便于 repair prompt 定位。
 func (e PlanLintError) Error() string {
 	if len(e.Issues) == 0 {
 		return "plan lint failed"

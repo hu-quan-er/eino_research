@@ -10,11 +10,15 @@ import (
 	"github.com/hu-quan-er/eino_research/internal/search"
 )
 
+// evidence binder 的默认阈值，控制最终答案 claim 绑定数量和文本匹配强度。
 const (
+	// defaultMaxEvidenceClaims 是默认最多绑定的最终答案 claim 数，避免 evidence 附录过长。
 	defaultMaxEvidenceClaims = 12
-	defaultMinEvidenceScore  = 2
+	// defaultMinEvidenceScore 是无显式 source id 时文本 overlap 的最低接受分。
+	defaultMinEvidenceScore = 2
 )
 
+// sourceIDCitationPattern 匹配最终答案中的 [src_1] 或 [src_1, src_2] citation。
 var sourceIDCitationPattern = regexp.MustCompile(`\[([A-Za-z0-9_.-]+(?:\s*,\s*[A-Za-z0-9_.-]+)*)\]`)
 
 // EvidenceBinder 负责把最终 Answer 中的关键 claim 绑定回 source/document/chunk。
@@ -98,18 +102,30 @@ func (r *Runner) bindFinalEvidence(ctx context.Context, in EvidenceBindingInput)
 	return answer
 }
 
+// answerClaimCandidate 是待绑定证据的最终答案 claim。
 type answerClaimCandidate struct {
-	Raw   string
+	// Raw 是原始 claim 文本，可能仍包含 [source_id] 引用。
+	Raw string
+	// Claim 是去掉 citation 后用于匹配证据的规范化文本。
 	Claim string
 }
 
+// evidenceCandidate 是可用于支撑最终 claim 的候选文本。
 type evidenceCandidate struct {
+	// SourceID 是候选证据对应的 source id。
 	SourceID string
-	ChunkID  string
-	Quote    string
-	Text     string
+	// ChunkID 是候选证据对应的 chunk id；source/snippet 候选可能为空。
+	ChunkID string
+	// Quote 是用于展示的短摘录。
+	Quote string
+	// Text 是用于相似度匹配的完整候选文本。
+	Text string
 }
 
+// extractAnswerClaims 从 Answer 中抽取需要绑定证据的 claim。
+//
+// 优先使用 KeyFindings，因为它们是结构化关键判断；没有时回退到 Markdown 段落/列表行，
+// 最后才使用 Summary，避免对整篇正文做过多噪声匹配。
 func extractAnswerClaims(answer Answer, limit int) []answerClaimCandidate {
 	rawClaims := make([]string, 0, len(answer.KeyFindings))
 	rawClaims = append(rawClaims, answer.KeyFindings...)
@@ -141,6 +157,9 @@ func extractAnswerClaims(answer Answer, limit int) []answerClaimCandidate {
 	return out
 }
 
+// extractMarkdownClaimLines 从 Markdown 正文中抽取可能代表 claim 的普通文本行。
+//
+// 该函数跳过标题、过短行和显式 source/evidence 行，只保留适合做证据匹配的陈述。
 func extractMarkdownClaimLines(markdown string, limit int) []string {
 	lines := strings.Split(markdown, "\n")
 	claims := make([]string, 0)
@@ -167,6 +186,7 @@ func extractMarkdownClaimLines(markdown string, limit int) []string {
 	return claims
 }
 
+// trimNumberedListPrefix 去掉 "1." 或 "1)" 形式的列表序号。
 func trimNumberedListPrefix(line string) string {
 	i := 0
 	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
@@ -181,6 +201,10 @@ func trimNumberedListPrefix(line string) string {
 	return strings.TrimSpace(line[i+1:])
 }
 
+// bindClaimEvidence 为单条 claim 寻找证据。
+//
+// 跳转顺序是：先信任最终答案中显式写出的已知 source id，再用文本 overlap 查找最相似
+// 的 document/source/finding 候选；两者都失败时标记 unsupported。
 func bindClaimEvidence(claim answerClaimCandidate, candidates []evidenceCandidate, knownSourceIDs map[string]struct{}, minScore int) ClaimEvidence {
 	explicitSourceIDs := extractKnownSourceIDs(claim.Raw, knownSourceIDs)
 	refs := refsForSourceIDs(explicitSourceIDs, candidates)
@@ -212,6 +236,10 @@ func bindClaimEvidence(claim answerClaimCandidate, candidates []evidenceCandidat
 	}
 }
 
+// buildEvidenceCandidates 从 documents、sources 和 todo findings 构造统一候选池。
+//
+// documents 最适合提供 quote；sources 的 title/snippet 是兜底；todo findings 则能在
+// document 缺失时保留研究过程中的结构化判断。
 func buildEvidenceCandidates(sources []search.Source, documents []SourceDocument, executions []TodoExecution) []evidenceCandidate {
 	candidates := make([]evidenceCandidate, 0)
 	for _, document := range documents {
@@ -260,6 +288,7 @@ func buildEvidenceCandidates(sources []search.Source, documents []SourceDocument
 	return candidates
 }
 
+// candidateSourceIDs 收集所有可被 final answer 显式引用的 source id。
 func candidateSourceIDs(candidates []evidenceCandidate, sources []search.Source, documents []SourceDocument) map[string]struct{} {
 	ids := make(map[string]struct{})
 	for _, candidate := range candidates {
@@ -280,6 +309,7 @@ func candidateSourceIDs(candidates []evidenceCandidate, sources []search.Source,
 	return ids
 }
 
+// extractKnownSourceIDs 从文本中的 [src_1] 或 [src_1, src_2] 引用里筛出已知 source id。
 func extractKnownSourceIDs(text string, knownSourceIDs map[string]struct{}) []string {
 	matches := sourceIDCitationPattern.FindAllStringSubmatch(text, -1)
 	ids := make([]string, 0, len(matches))
@@ -300,6 +330,9 @@ func extractKnownSourceIDs(text string, knownSourceIDs map[string]struct{}) []st
 	return dedupeStrings(ids)
 }
 
+// refsForSourceIDs 为显式 source id 生成 EvidenceRef。
+//
+// 如果候选池里能找到 chunk/quote，就补上更细证据；否则仍保留 source-level 引用。
 func refsForSourceIDs(sourceIDs []string, candidates []evidenceCandidate) []EvidenceRef {
 	if len(sourceIDs) == 0 {
 		return nil
@@ -325,6 +358,7 @@ func refsForSourceIDs(sourceIDs []string, candidates []evidenceCandidate) []Evid
 	return refs
 }
 
+// bestCandidateForClaim 选择与 claim token overlap 最高的候选证据。
 func bestCandidateForClaim(claim string, candidates []evidenceCandidate) (EvidenceRef, int) {
 	tokens := evidenceTokens(claim)
 	if len(tokens) == 0 {
@@ -350,6 +384,7 @@ func bestCandidateForClaim(claim string, candidates []evidenceCandidate) (Eviden
 	}, bestScore
 }
 
+// scoreEvidenceCandidate 计算 claim token 在候选文本中出现的数量。
 func scoreEvidenceCandidate(tokens []string, text string) int {
 	text = strings.ToLower(text)
 	score := 0
@@ -361,6 +396,9 @@ func scoreEvidenceCandidate(tokens []string, text string) int {
 	return score
 }
 
+// evidenceTokens 提取用于证据匹配的 claim token。
+//
+// 这里使用简单规则而非 embedding，是为了让 eval 和单元测试保持确定性。
 func evidenceTokens(text string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(stripCitationText(text)), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
@@ -381,6 +419,7 @@ func evidenceTokens(text string) []string {
 	return tokens
 }
 
+// stripCitationText 移除 [source_id] 形式 citation，并修复 citation 删除后产生的空格。
 func stripCitationText(text string) string {
 	text = strings.Join(strings.Fields(sourceIDCitationPattern.ReplaceAllString(text, "")), " ")
 	for _, punct := range []string{".", ",", ";", ":", "?", "!"} {
@@ -389,6 +428,7 @@ func stripCitationText(text string) string {
 	return text
 }
 
+// isEvidenceStopword 判断证据匹配中应忽略的低信息量英文 token。
 func isEvidenceStopword(token string) bool {
 	switch token {
 	case "the", "and", "for", "with", "from", "that", "this", "into", "onto", "when", "where", "what", "why", "how", "can", "should", "would", "could", "use", "used", "using", "has", "have", "are", "was", "were", "its", "their", "there":
