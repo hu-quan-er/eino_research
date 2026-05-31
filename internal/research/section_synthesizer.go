@@ -101,7 +101,7 @@ Return only one JSON object matching:
 
 // parseSectionAnswer 解析模型返回的 SectionAnswer，并拒绝空 answer。
 func parseSectionAnswer(content string) (SectionAnswer, error) {
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		return SectionAnswer{}, fmt.Errorf("section answer output is empty")
 	}
 	var answer SectionAnswer
@@ -152,6 +152,7 @@ func buildSectionSynthesisContext(in SectionSynthesisInput) sectionSynthesisCont
 			Summary:  todo.Summary,
 			Findings: todo.Findings,
 			Gaps:     todo.Gaps,
+			Error:    todo.Error,
 		})
 	}
 	return sectionSynthesisContext{
@@ -183,4 +184,5 @@ type sectionTodoContext struct {
 	Summary  string     `json:"summary"`
 	Findings []Finding  `json:"findings,omitempty"`
 	Gaps     []string   `json:"gaps,omitempty"`
+	Error    string     `json:"error,omitempty"`
 }

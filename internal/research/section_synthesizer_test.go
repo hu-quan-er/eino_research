@@ -48,3 +48,20 @@ func TestAgentSectionSynthesizerRejectsEmptyAnswer(t *testing.T) {
 		t.Fatal("want error on empty section answer (no summary/findings/limitations)")
 	}
 }
+
+func TestAgentSectionSynthesizerUsesInputIdentityNotModel(t *testing.T) {
+	model := &staticToolCallingModel{content: `{"section_id":"WRONG","title":"WRONG","summary":"s","key_findings":["k"]}`}
+	synth := NewAgentSectionSynthesizer(model)
+	ans, err := synth.SynthesizeSection(context.Background(), SectionSynthesisInput{
+		Section: ResearchSection{ID: "s1", Title: "S1"},
+	})
+	if err != nil {
+		t.Fatalf("SynthesizeSection: %v", err)
+	}
+	if ans.SectionID != "s1" {
+		t.Errorf("SectionID = %q, want s1 (from input, not model)", ans.SectionID)
+	}
+	if ans.Title != "S1" {
+		t.Errorf("Title = %q, want S1 (from input, not model)", ans.Title)
+	}
+}
