@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 )
 
@@ -241,10 +242,10 @@ func sourceIDPrefix(stepID string) string {
 }
 
 // buildTodoResearchers 根据 TodoDispatcher 产出的 job 构建 researcher。
-func buildTodoResearchers(ctx context.Context, cfg RunnerConfig, jobs []TodoResearchJob, researchTools ...tool.BaseTool) ([]Researcher, error) {
+func buildTodoResearchers(ctx context.Context, m model.ToolCallingChatModel, jobs []TodoResearchJob, researchTools ...tool.BaseTool) ([]Researcher, error) {
 	researchers := make([]Researcher, 0, len(jobs))
 	for _, job := range jobs {
-		researcher, err := NewAgentResearcher(ctx, job.RoleID, job.Focus, cfg.Model, researchTools...)
+		researcher, err := NewAgentResearcher(ctx, job.RoleID, job.Focus, m, researchTools...)
 		if err != nil {
 			return nil, fmt.Errorf("new %s: %w", job.RoleID, err)
 		}

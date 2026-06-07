@@ -52,7 +52,7 @@ type TodoSchedulerConfig struct {
 type TodoScheduler struct {
 	// maxParallel 限制每一批 runnable todo 的并发数量。
 	maxParallel int
-	// executor 是单个 todo 的执行函数，默认由 Runner.executeTodo 提供。
+	// executor 是单个 todo 的执行函数，默认由 defaultTodoExecutor.execute 提供。
 	executor TodoExecutor
 	// replanner 在失败后可返回 plan patch；为空时失败只会阻塞下游依赖。
 	replanner TodoReplanner

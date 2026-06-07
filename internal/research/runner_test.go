@@ -14,7 +14,7 @@ import (
 )
 
 type staticToolCallingModel struct {
-	// mu 保护并发字段：默认 executeTodo 路径会并行驱动多个 researcher 共享同一个 model。
+	// mu 保护并发字段：默认 todo 执行路径会并行驱动多个 researcher 共享同一个 model。
 	mu              sync.Mutex
 	content         string
 	contents        []string
