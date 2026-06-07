@@ -47,6 +47,8 @@ type RunnerConfig struct {
 	EvidenceBinder EvidenceBinder
 	// ClaimVerifier 可替换最终 claim 校验器；未传入时使用 RuleBasedClaimVerifier。
 	ClaimVerifier ClaimVerifier
+	// SectionSynthesizer 可替换 section 级归纳器；未传入时使用 AgentSectionSynthesizer。
+	SectionSynthesizer SectionSynthesizer
 	// Events 是可选的外部事件总线。无论是否传入，Runner 都会在 Execute 内部额外挂上
 	// TraceStore 和 BudgetMeter 以填充 Metadata.Trace/Budget；传入时事件也会 fan-out 给它。
 	Events *EventBus
@@ -645,4 +647,58 @@ func parseResearchTodoPlanToolCall(msg *schema.Message) (ResearchTodoPlan, strin
 		return plan, toolCall.Function.Arguments, nil
 	}
 	return ResearchTodoPlan{}, "", fmt.Errorf("planner did not call %s", researchTodoPlanToolName)
+}
+
+// synthesizeSections 对每个 section 调用 SectionSynthesizer（v1 串行）。
+//
+// 成功时用 SectionAnswer 回填 SectionExecution.Summary/KeyFindings/Limitations；失败或空
+// answer 时走确定性兜底（聚合该 section 下 todo 的 findings/gaps）。兜底也产出 SectionAnswer，
+// 因此返回的 []SectionAnswer 始终覆盖全部 section，供 Final 走紧凑路径。
+func (r *Runner) synthesizeSections(ctx context.Context, question string, plan ResearchTodoPlan, sections []SectionExecution) ([]SectionExecution, []SectionAnswer) {
+	synthesizer := r.cfg.SectionSynthesizer
+	if synthesizer == nil {
+		synthesizer = NewAgentSectionSynthesizer(r.cfg.Model)
+	}
+
+	out := make([]SectionExecution, len(sections))
+	answers := make([]SectionAnswer, 0, len(sections))
+	for i, section := range sections {
+		ans, err := synthesizer.SynthesizeSection(ctx, SectionSynthesisInput{
+			Question:  question,
+			Objective: plan.Objective,
+			Section:   section.Section,
+			Todos:     section.Todos,
+			Documents: collectSectionDocuments(section),
+		})
+		if err != nil || isEmptySectionAnswer(ans) {
+			ans = fallbackSectionAnswer(section)
+		}
+		section.Summary = ans.Summary
+		section.KeyFindings = ans.KeyFindings
+		section.Limitations = ans.Limitations
+		out[i] = section
+		answers = append(answers, ans)
+	}
+	return out, answers
+}
+
+// fallbackSectionAnswer 在模型合成失败时基于 todo 结果构造确定性 SectionAnswer。
+func fallbackSectionAnswer(section SectionExecution) SectionAnswer {
+	summary := summarizeSectionTodos(section.Todos)
+	return SectionAnswer{
+		SectionID:   section.Section.ID,
+		Title:       sectionTitleOrID(section.Section),
+		Summary:     summary,
+		KeyFindings: collectTopFindingClaims(section.Todos, 5),
+		Limitations: collectFinalLimitations(section.Todos),
+	}
+}
+
+// collectSectionDocuments 合并该 section 下所有 todo 的 documents 并去重。
+func collectSectionDocuments(section SectionExecution) []SourceDocument {
+	documents := make([]SourceDocument, 0)
+	for _, todo := range section.Todos {
+		documents = append(documents, todo.Documents...)
+	}
+	return dedupeSourceDocuments(documents)
 }
