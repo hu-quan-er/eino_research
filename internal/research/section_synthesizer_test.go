@@ -2,6 +2,8 @@ package research
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -63,5 +65,26 @@ func TestAgentSectionSynthesizerUsesInputIdentityNotModel(t *testing.T) {
 	}
 	if ans.Title != "S1" {
 		t.Errorf("Title = %q, want S1 (from input, not model)", ans.Title)
+	}
+}
+
+func TestSectionExecutionSerializesStructuredFields(t *testing.T) {
+	se := SectionExecution{
+		Section: ResearchSection{ID: "s1", Title: "S1"},
+		Summary: "sum",
+	}
+	data, err := json.Marshal(se)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"key_findings"`) {
+		t.Errorf("key_findings must be omitempty when empty, got %s", data)
+	}
+
+	se.KeyFindings = []string{"kf"}
+	se.Limitations = []string{"lim"}
+	data, _ = json.Marshal(se)
+	if !strings.Contains(string(data), `"key_findings"`) || !strings.Contains(string(data), `"limitations"`) {
+		t.Errorf("structured fields should serialize when set, got %s", data)
 	}
 }

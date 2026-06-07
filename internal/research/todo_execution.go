@@ -52,6 +52,10 @@ type SectionExecution struct {
 	Section ResearchSection `json:"section"`
 	// Todos 是该 section 下的 todo 执行结果。
 	Todos []TodoExecution `json:"todos"`
-	// Summary 是该 section 下 todo summaries 的合并文本。
+	// Summary 是该 section 的综合摘要，由 SectionSynthesizer 产出（兜底时为 todo summary 拼接）。
 	Summary string `json:"summary"`
+	// KeyFindings 是该 section 的核心发现，来自 SectionAnswer。
+	KeyFindings []string `json:"key_findings,omitempty"`
+	// Limitations 是该 section 的证据缺口或不确定性，来自 SectionAnswer。
+	Limitations []string `json:"limitations,omitempty"`
 }
