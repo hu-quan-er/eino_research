@@ -162,7 +162,10 @@ func allResearchersFailedError(results []ResearcherResult, researcherErrors []er
 	return errors.Join(errs...)
 }
 
-// researcherRoleForIndex 优先使用 researcher 自带 metadata，缺省时回退到历史固定角色顺序。
+// researcherRoleForIndex 优先使用 researcher 自带 metadata，缺省时回退到按位置兜底命名。
+//
+// 生产路径的 AgentResearcher 总会携带非空 role，因此回退分支只在注入的 Researcher
+// 未实现 ResearcherMetadata（或返回空角色）时触发。
 func researcherRoleForIndex(i int, researcher Researcher) string {
 	if metadata, ok := researcher.(ResearcherMetadata); ok {
 		if role := strings.TrimSpace(metadata.ResearcherRole()); role != "" {
@@ -172,7 +175,9 @@ func researcherRoleForIndex(i int, researcher Researcher) string {
 	return roleForIndex(i)
 }
 
-// researcherFocusForIndex 优先使用 researcher 自带 focus，缺省时回退到历史固定 focus。
+// researcherFocusForIndex 优先使用 researcher 自带 focus，缺省时回退到按位置兜底 focus。
+//
+// 与 researcherRoleForIndex 一样，回退分支只为缺 metadata 的注入式 Researcher 兜底。
 func researcherFocusForIndex(i int, researcher Researcher) string {
 	if metadata, ok := researcher.(ResearcherMetadata); ok {
 		if focus := strings.TrimSpace(metadata.ResearcherFocus()); focus != "" {
@@ -196,7 +201,10 @@ func isNilDependency(v any) bool {
 	}
 }
 
-// roleForIndex 是 legacy 固定三角色 fan-out 的兜底命名。
+// roleForIndex 为缺少 ResearcherMetadata 的 researcher 按位置生成稳定角色名。
+//
+// 它不是当前派发逻辑的角色来源（角色由 TodoDispatcher 决定），仅作为 Researcher 接口
+// 未携带 role 时的防御性兜底。
 func roleForIndex(i int) string {
 	switch i {
 	case 0:
@@ -208,7 +216,9 @@ func roleForIndex(i int) string {
 	}
 }
 
-// focusForIndex 是 legacy 固定三角色 fan-out 的兜底研究方向。
+// focusForIndex 为缺少 ResearcherMetadata 的 researcher 按位置生成兜底研究方向。
+//
+// 与 roleForIndex 配套，仅在注入的 Researcher 未提供 focus 时使用。
 func focusForIndex(i int) string {
 	switch i {
 	case 0:
