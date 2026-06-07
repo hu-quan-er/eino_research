@@ -108,7 +108,7 @@ func (m *BudgetMeter) Emit(_ context.Context, e Event) {
 		m.report.TodosCompleted++
 	case EventTodoFailed:
 		m.report.TodosFailed++
-	case EventSynthesisCompleted, EventFinalCompleted, EventPlanCompleted:
+	case EventSynthesisCompleted, EventFinalCompleted, EventPlanCompleted, EventSectionCompleted:
 		m.report.ModelCalls++
 	}
 	m.report.TokensIn += e.TokensIn

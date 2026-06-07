@@ -660,9 +660,13 @@ func (r *Runner) synthesizeSections(ctx context.Context, question string, plan R
 		synthesizer = NewAgentSectionSynthesizer(r.cfg.Model)
 	}
 
+	bus := eventBusFromContext(ctx)
+	runID := runIDFromContext(ctx)
+
 	out := make([]SectionExecution, len(sections))
 	answers := make([]SectionAnswer, 0, len(sections))
 	for i, section := range sections {
+		bus.Emit(ctx, Event{Kind: EventSectionStarted, RunID: runID, TodoID: section.Section.ID})
 		ans, err := synthesizer.SynthesizeSection(ctx, SectionSynthesisInput{
 			Question:  question,
 			Objective: plan.Objective,
@@ -670,14 +674,21 @@ func (r *Runner) synthesizeSections(ctx context.Context, question string, plan R
 			Todos:     section.Todos,
 			Documents: collectSectionDocuments(section),
 		})
+		fellBack := false
 		if err != nil || isEmptySectionAnswer(ans) {
 			ans = fallbackSectionAnswer(section)
+			fellBack = true
 		}
 		section.Summary = ans.Summary
 		section.KeyFindings = ans.KeyFindings
 		section.Limitations = ans.Limitations
 		out[i] = section
 		answers = append(answers, ans)
+		msg := ""
+		if fellBack {
+			msg = "section synthesis used deterministic fallback"
+		}
+		bus.Emit(ctx, Event{Kind: EventSectionCompleted, RunID: runID, TodoID: section.Section.ID, Message: msg})
 	}
 	return out, answers
 }

@@ -46,6 +46,10 @@ const (
 	EventClaimsVerified EventKind = "claims.verified"
 	// EventTraceTruncated 是 TraceStore 快照中插入的截断提示事件。
 	EventTraceTruncated EventKind = "trace.truncated"
+	// EventSectionStarted 表示某个 section 的归纳开始；section id 通过 Event.TodoID 承载。
+	EventSectionStarted EventKind = "section.started"
+	// EventSectionCompleted 表示某个 section 的归纳完成；Message 可记录是否走了确定性兜底。
+	EventSectionCompleted EventKind = "section.completed"
 )
 
 // Event 是阶段边界发出的结构化事件。Kind、At、RunID 为必填字段；其他字段使用 omitempty。

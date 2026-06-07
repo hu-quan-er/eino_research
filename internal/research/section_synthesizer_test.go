@@ -168,3 +168,39 @@ func TestSynthesizeSectionsDefaultsToAgentWhenNil(t *testing.T) {
 		t.Errorf("summary = %q, want agent default", out[0].Summary)
 	}
 }
+
+func TestSynthesizeSectionsEmitsSectionEvents(t *testing.T) {
+	rec := &recordingSink{}
+	bus := &EventBus{}
+	bus.Add(rec)
+	fake := &fakeSectionSynthesizer{}
+	runner, err := NewRunner(RunnerConfig{
+		Model:              &staticToolCallingModel{content: "{}"},
+		SearchProvider:     search.NewMockProvider(),
+		SectionSynthesizer: fake,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	ctx := withEventBus(context.Background(), bus)
+	sections := []SectionExecution{
+		{Section: ResearchSection{ID: "s1", Title: "S1"}, Todos: []TodoExecution{{Todo: ResearchTodo{ID: "t1"}, Status: TodoDone, Summary: "x"}}},
+	}
+	runner.synthesizeSections(ctx, "Q?", validTodoPlan(), sections)
+
+	kinds := make(map[EventKind]int)
+	for _, e := range rec.Snapshot() {
+		kinds[e.Kind]++
+	}
+	if kinds[EventSectionStarted] == 0 || kinds[EventSectionCompleted] == 0 {
+		t.Fatalf("missing section events; got %v", kinds)
+	}
+}
+
+func TestBudgetMeterCountsSectionCompleted(t *testing.T) {
+	meter := NewBudgetMeter()
+	meter.Emit(context.Background(), Event{Kind: EventSectionCompleted})
+	if meter.Snapshot().ModelCalls != 1 {
+		t.Fatalf("ModelCalls = %d, want 1", meter.Snapshot().ModelCalls)
+	}
+}
