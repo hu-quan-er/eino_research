@@ -107,7 +107,7 @@ executeTodo
   +--> AgentSynthesizer
   |      |
   |      v
-  |   StepExecution
+  |   TodoExecution（研究产出）
   |
   v
 TodoExecution[]
@@ -272,7 +272,7 @@ ResearcherResult[]
 AgentSynthesizer
   |
   v
-StepExecution
+TodoExecution（研究产出，Todo/Status/Findings 由 finalize 补齐）
   |
   v
 gap check
@@ -374,11 +374,10 @@ researcher 的目标输出是 `ResearcherResult`：
 
 ### 7. Synthesis 和 Gap Retry
 
-所有 researcher 完成后，`AgentSynthesizer` 把多个 `ResearcherResult` 合成为 `StepExecution`：
+所有 researcher 完成后，`AgentSynthesizer` 把多个 `ResearcherResult` 合成为 `TodoExecution` 的研究产出部分（`Todo`/`Status`/`Findings` 由后续 finalize 阶段补齐）：
 
 ```json
 {
-  "step": {},
   "researcher_results": [],
   "summary": "本 todo 的综合结论",
   "gaps": ["仍缺失的问题"],
@@ -401,7 +400,7 @@ researcher 的目标输出是 `ResearcherResult`：
 
 ### 8. 证据归一化
 
-`normalizeStepExecutionSources` 是 step 结果进入上层前的统一证据处理入口，主要做：
+`normalizeTodoExecutionSources` 是 todo 结果进入上层前的统一证据处理入口，主要做：
 
 - 合并多个 researcher 的 sources。
 - 按 URL 去重并重写 source ID。
