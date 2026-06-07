@@ -113,6 +113,9 @@ executeTodo
 TodoExecution[]
   |
   v
+SectionSynthesizer
+  |
+  v
 FinalSynthesizer
   |
   v
@@ -152,7 +155,7 @@ render.Markdown / render.JSON
 `internal/research`
 
 - 核心 workflow 所在模块。
-- 包含 planner、todo plan validation、todo scheduler、todo dispatcher、researcher、todo synthesizer、final synthesizer、evidence binder、claim verifier、工具封装、证据归一化和结果模型。
+- 包含 planner、todo plan validation、todo scheduler、todo dispatcher、researcher、todo synthesizer、section synthesizer（按 section 归纳，压缩 final 输入）、final synthesizer、evidence binder、claim verifier、工具封装、证据归一化和结果模型。
 
 `internal/render`
 
@@ -417,6 +420,8 @@ researcher 的目标输出是 `ResearcherResult`：
 这让 Markdown 报告和 JSON 输出都可以追踪到具体证据片段。
 
 ### 9. Final Synthesis
+
+在最终综合之前，`SectionSynthesizer` 会先对每个 section 做归纳，输出 `SectionAnswer`（summary、key_findings、limitations）。FinalSynthesizer 默认消费这些紧凑的 section answer，而不是全部 todo 结果；当某个 section 归纳失败时会回退到该 section 的确定性兜底，不影响其他 section。
 
 所有 todo 执行完成并完成 source/document 去重后，`Runner.Execute` 会调用 `FinalSynthesizer` 生成最终 `Answer`。
 
