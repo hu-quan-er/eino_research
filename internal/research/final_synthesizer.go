@@ -33,6 +33,8 @@ type FinalSynthesisInput struct {
 	Sources []search.Source `json:"sources"`
 	// Documents 是可引用的正文切片。
 	Documents []SourceDocument `json:"documents,omitempty"`
+	// SectionAnswers 是 section 级归纳产物；非空时 Final 上下文走紧凑路径，不再 dump 全部 todo。
+	SectionAnswers []SectionAnswer `json:"section_answers,omitempty"`
 }
 
 // AgentFinalSynthesizer 使用模型生成最终全局报告。
@@ -164,7 +166,21 @@ func fallbackFinalAnswer(in FinalSynthesisInput, rawOutput string, cause error) 
 }
 
 // buildFinalSynthesisContext 压缩最终综合输入，避免把重复结构直接塞给模型。
+//
+// 有 section answers 时走紧凑路径（只放 section answers + sources + documents）；否则回退到
+// 把全部 todo 结果 dump 给模型的旧路径。
 func buildFinalSynthesisContext(in FinalSynthesisInput) finalSynthesisContext {
+	ctx := finalSynthesisContext{
+		Question:  in.Question,
+		Objective: in.Plan.Objective,
+		Sources:   in.Sources,
+		Documents: in.Documents,
+	}
+	if len(in.SectionAnswers) > 0 {
+		ctx.SectionAnswers = in.SectionAnswers
+		return ctx
+	}
+
 	sections := make([]finalSectionSynthesisContext, 0, len(in.SectionExecutions))
 	for _, section := range in.SectionExecutions {
 		todos := make([]finalTodoSynthesisContext, 0, len(section.Todos))
@@ -189,14 +205,8 @@ func buildFinalSynthesisContext(in FinalSynthesisInput) finalSynthesisContext {
 			Todos:   todos,
 		})
 	}
-
-	return finalSynthesisContext{
-		Question:  in.Question,
-		Objective: in.Plan.Objective,
-		Sections:  sections,
-		Sources:   in.Sources,
-		Documents: in.Documents,
-	}
+	ctx.Sections = sections
+	return ctx
 }
 
 // finalSynthesisContext 是给最终综合模型的压缩上下文。
@@ -205,8 +215,10 @@ type finalSynthesisContext struct {
 	Question string `json:"question"`
 	// Objective 是 planner 提炼出的全局目标，比原问题更适合作为跨 todo 汇总轴。
 	Objective string `json:"objective"`
-	// Sections 是按报告章节压缩后的 todo 结果。
-	Sections []finalSectionSynthesisContext `json:"sections"`
+	// SectionAnswers 是 section 级归纳产物；非空时作为紧凑路径的主要内容，替代全部 todo dump。
+	SectionAnswers []SectionAnswer `json:"section_answers,omitempty"`
+	// Sections 是按报告章节压缩后的 todo 结果；仅在没有 section answers 的回退路径填充。
+	Sections []finalSectionSynthesisContext `json:"sections,omitempty"`
 	// Sources 是最终去重后的来源元数据，用于模型写内联 source id。
 	Sources []search.Source `json:"sources"`
 	// Documents 是可引用正文切片，用于模型核对 quote 和避免编造事实。

@@ -204,3 +204,44 @@ func TestBudgetMeterCountsSectionCompleted(t *testing.T) {
 		t.Fatalf("ModelCalls = %d, want 1", meter.Snapshot().ModelCalls)
 	}
 }
+
+func TestBuildFinalSynthesisContextUsesSectionAnswersWhenPresent(t *testing.T) {
+	in := FinalSynthesisInput{
+		Question: "Q?",
+		Plan:     ResearchTodoPlan{Objective: "obj"},
+		SectionAnswers: []SectionAnswer{
+			{SectionID: "s1", Title: "S1", Summary: "section sum", KeyFindings: []string{"kf [src_1]"}},
+		},
+		// 即便有 todo 执行结果，紧凑路径也不应把它们 dump 进上下文。
+		SectionExecutions: []SectionExecution{
+			{Section: ResearchSection{ID: "s1"}, Todos: []TodoExecution{{Todo: ResearchTodo{ID: "t1", Title: "verbose todo title"}}}},
+		},
+	}
+	data, err := json.Marshal(buildFinalSynthesisContext(in))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"section_answers"`) || !strings.Contains(s, "section sum") {
+		t.Errorf("compact context should contain section_answers, got %s", s)
+	}
+	if strings.Contains(s, "verbose todo title") {
+		t.Errorf("compact context must not dump full todos, got %s", s)
+	}
+}
+
+func TestBuildFinalSynthesisContextFallsBackToTodosWhenNoSectionAnswers(t *testing.T) {
+	in := FinalSynthesisInput{
+		Question: "Q?",
+		SectionExecutions: []SectionExecution{
+			{Section: ResearchSection{ID: "s1", Title: "S1"}, Todos: []TodoExecution{{Todo: ResearchTodo{ID: "t1", Title: "verbose todo title"}}}},
+		},
+	}
+	data, err := json.Marshal(buildFinalSynthesisContext(in))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), "verbose todo title") {
+		t.Errorf("fallback context should contain todo dump, got %s", data)
+	}
+}
