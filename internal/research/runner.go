@@ -362,14 +362,9 @@ func (r *Runner) executeTodo(ctx context.Context, in TodoExecutorInput) (TodoExe
 	bus := eventBusFromContext(ctx)
 	runID := runIDFromContext(ctx)
 
+	// 预算默认值由 NewRunner 统一兜底，这里直接使用，避免两处重复定义默认常量。
 	maxSearches := r.cfg.MaxSearchesPerStep
-	if maxSearches <= 0 {
-		maxSearches = 6
-	}
 	resultsPerSearch := r.cfg.ResultsPerSearch
-	if resultsPerSearch <= 0 {
-		resultsPerSearch = 5
-	}
 
 	dispatcher := r.cfg.TodoDispatcher
 	if dispatcher == nil {

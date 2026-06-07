@@ -115,14 +115,6 @@ func (d RuleBasedTodoDispatcher) Dispatch(ctx context.Context, in TodoDispatchIn
 	return jobs, nil
 }
 
-// DeriveTodoResearchRoles 根据 todo 内容确定需要哪些研究视角。
-//
-// synthesis todo 会走综合/查漏角色；普通 todo 会先保留基础研究角色，再按 todo 内容、
-// acceptance criteria 和依赖结果加入更专门的 researcher。
-func DeriveTodoResearchRoles(todo ResearchTodo, plan ResearchTodoPlan) []TodoResearchRole {
-	return deriveTodoResearchRoles(todo, plan, nil)
-}
-
 // deriveTodoResearchRoles 是派发规则核心。
 //
 // 跳转逻辑：先识别 synthesis todo 走专用综合/查漏路径；普通 todo 先加入基础证据角色，

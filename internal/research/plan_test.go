@@ -11,7 +11,6 @@ func TestResearchStepFirstStepPromptReturnsJSON(t *testing.T) {
 		Title:           "Collect evidence",
 		Question:        "What evidence exists?",
 		SearchQueries:   []string{"research evidence"},
-		ResearchAxes:    []string{"evidence"},
 		SuccessCriteria: []string{"Cites sources."},
 	}
 

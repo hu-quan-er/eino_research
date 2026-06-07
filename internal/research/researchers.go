@@ -225,12 +225,6 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	return out, nil
 }
 
-// collectResearcherSources 从 researcher 结果中收集并归一化 sources。
-func collectResearcherSources(results []ResearcherResult) []search.Source {
-	_, sources := normalizeResearcherSources(results)
-	return sources
-}
-
 // normalizeStepExecutionSources 是 step 结果进入上层前的统一证据归一化入口。
 //
 // 它会合并 researcher sources、生成 documents、重写 finding source IDs，并为缺失的
