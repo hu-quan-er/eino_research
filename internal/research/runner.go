@@ -294,6 +294,10 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 	result.Sources = collectTodoExecutionSources(todoExecutions)
 	result.Documents = collectTodoExecutionDocuments(todoExecutions)
 
+	// section 级归纳：压缩 Final 输入，并为每个 section 提供独立失败隔离。
+	sectionExecutions, sectionAnswers := r.synthesizeSections(ctx, question, plan, result.SectionExecutions)
+	result.SectionExecutions = sectionExecutions
+
 	// 最终输出走三段式后处理：
 	// 1. FinalSynthesizer 负责跨 todo 的完整回答；
 	// 2. EvidenceBinder 把回答里的关键 claim 重新绑定到 source/chunk；
@@ -306,6 +310,7 @@ func (r *Runner) Execute(ctx context.Context, question string, plan ResearchTodo
 		TodoExecutions:    result.TodoExecutions,
 		Sources:           result.Sources,
 		Documents:         result.Documents,
+		SectionAnswers:    sectionAnswers,
 	})
 	bus.Emit(ctx, Event{Kind: EventFinalCompleted, RunID: runID})
 

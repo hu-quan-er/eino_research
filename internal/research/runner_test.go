@@ -719,3 +719,46 @@ func TestRunnerRunFullEventTopology(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerExecutePopulatesSectionAnswers(t *testing.T) {
+	planJSON := `{
+		"objective": "Test",
+		"sections": [{"id": "s1", "title": "S1"}],
+		"todos": [{"id": "t1", "section_id": "s1", "title": "T1", "question": "Q?",
+		           "search_queries": ["q"], "acceptance_criteria": ["ac"]}]
+	}`
+	// 注入 section 合成器，返回可识别的 summary，断言它进入了 SectionExecution。
+	fake := &fakeSectionSynthesizer{}
+	model := &staticToolCallingModel{content: `{"summary":"final","key_findings":["kf"],"limitations":[]}`}
+	runner, err := NewRunner(RunnerConfig{
+		Model:              model,
+		SearchProvider:     search.NewMockProvider(),
+		SectionSynthesizer: fake,
+		TodoExecutor: func(_ context.Context, in TodoExecutorInput) (TodoExecution, error) {
+			return TodoExecution{Todo: in.Todo, Status: TodoDone, Summary: "todo done"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	var plan ResearchTodoPlan
+	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+		t.Fatalf("unmarshal plan: %v", err)
+	}
+	result, err := runner.Execute(context.Background(), "Q?", plan)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("section synthesizer calls = %d, want 1", fake.calls)
+	}
+	if len(result.SectionExecutions) != 1 {
+		t.Fatalf("section executions = %d, want 1", len(result.SectionExecutions))
+	}
+	if result.SectionExecutions[0].Summary != "model summary for s1" {
+		t.Errorf("section summary = %q, want model summary", result.SectionExecutions[0].Summary)
+	}
+	if len(result.SectionExecutions[0].KeyFindings) == 0 {
+		t.Error("section should carry key findings")
+	}
+}
