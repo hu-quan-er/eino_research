@@ -50,7 +50,7 @@ func newDefaultTodoExecutor(cfg RunnerConfig) *defaultTodoExecutor {
 // value 直接注入 TodoScheduler。
 //
 // 逻辑顺序为：派发 researcher jobs、构建 web_search/web_fetch 工具、并行执行 researcher、
-// synthesis、bounded gap retry，最后把 StepExecution 转回 TodoExecution。
+// synthesis、bounded gap retry，最后 finalize 为完整 TodoExecution。
 func (e *defaultTodoExecutor) execute(ctx context.Context, in TodoExecutorInput) (TodoExecution, error) {
 	// todo.started/completed/failed 由 TodoScheduler 统一发出（覆盖所有 executor 实现）；
 	// execute 只负责发出执行器内部的 dispatch/researcher/synthesis 事件。
@@ -120,7 +120,7 @@ func (e *defaultTodoExecutor) execute(ctx context.Context, in TodoExecutorInput)
 		Todo:                 in.Todo,
 		DependencyExecutions: in.DependencyExecutions,
 		MaxAttempts:          e.maxTodoResearchIterations,
-		ExecuteStep: func(ctx context.Context, input StepExecutionInput) (StepExecution, error) {
+		ExecuteStep: func(ctx context.Context, input StepExecutionInput) (TodoExecution, error) {
 			for _, job := range jobs {
 				bus.Emit(ctx, Event{Kind: EventResearcherStarted, RunID: runID, TodoID: in.Todo.ID, Role: job.RoleID})
 			}
@@ -129,7 +129,7 @@ func (e *defaultTodoExecutor) execute(ctx context.Context, in TodoExecutorInput)
 			}
 			execution, err := stepExecutor.ExecuteStep(ctx, input)
 			if err != nil {
-				return StepExecution{}, err
+				return TodoExecution{}, err
 			}
 			for _, res := range execution.ResearcherResults {
 				bus.Emit(ctx, Event{Kind: EventResearcherCompleted, RunID: runID, TodoID: in.Todo.ID, Role: res.Role})
@@ -147,5 +147,5 @@ func (e *defaultTodoExecutor) execute(ctx context.Context, in TodoExecutorInput)
 		return TodoExecution{}, err
 	}
 
-	return stepExecutionToTodoExecution(in.Todo, execution), nil
+	return finalizeTodoExecution(in.Todo, execution), nil
 }

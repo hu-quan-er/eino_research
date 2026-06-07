@@ -7,7 +7,7 @@ import (
 )
 
 // StepExecuteFunc 是 todo research loop 每一轮实际执行 step 的函数。
-type StepExecuteFunc func(context.Context, StepExecutionInput) (StepExecution, error)
+type StepExecuteFunc func(context.Context, StepExecutionInput) (TodoExecution, error)
 
 // TodoResearchLoopInput 描述一个 todo 内部 bounded research loop 的输入。
 type TodoResearchLoopInput struct {
@@ -27,23 +27,23 @@ type TodoResearchLoopInput struct {
 //
 // 每轮执行后会用确定性规则检查 gap；如果仍有 gap 且没到上限，会把上一轮结果作为 prior
 // executed step 传给下一轮，促使 researcher 针对缺口继续补证据。
-func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExecution, error) {
+func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (TodoExecution, error) {
 	if in.ExecuteStep == nil {
-		return StepExecution{}, fmt.Errorf("execute step function is required")
+		return TodoExecution{}, fmt.Errorf("execute step function is required")
 	}
 	maxAttempts := in.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
 
-	baseSteps := dependencyExecutionsAsSteps(in.DependencyExecutions)
-	attempts := make([]StepExecution, 0, maxAttempts)
+	baseViews := dependencyResearchViews(in.DependencyExecutions)
+	attempts := make([]TodoExecution, 0, maxAttempts)
 	step := todoToResearchStep(in.Todo)
-	var last StepExecution
+	var last TodoExecution
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return StepExecution{}, err
+			return TodoExecution{}, err
 		}
 		if attempt > 1 {
 			// 第 1 轮是常规执行；只有进入第 2 轮起才算 gap 驱动的 retry。
@@ -56,18 +56,20 @@ func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExe
 		}
 
 		// 每一轮都把“依赖结果 + 前几轮尝试结果”作为上下文，帮助模型针对 gap 补充研究。
-		executedSteps := append([]StepExecution{}, baseSteps...)
-		executedSteps = append(executedSteps, attempts...)
+		executedViews := append([]priorResearchView{}, baseViews...)
+		for _, prev := range attempts {
+			executedViews = append(executedViews, attemptResearchView(prev, step))
+		}
 		execution, err := in.ExecuteStep(ctx, StepExecutionInput{
 			Question:      in.Plan.Objective,
 			Step:          step,
-			ExecutedSteps: executedSteps,
+			ExecutedSteps: executedViews,
 		})
 		if err != nil {
-			return StepExecution{}, err
+			return TodoExecution{}, err
 		}
 
-		execution = normalizeStepExecutionSources(execution)
+		execution = normalizeTodoExecutionSources(execution)
 		gaps := todoResearchGaps(in.Plan, in.Todo, execution)
 		last = execution
 		if len(gaps) == 0 {
@@ -85,7 +87,7 @@ func runTodoResearchLoop(ctx context.Context, in TodoResearchLoopInput) (StepExe
 // todoResearchGaps 使用确定性规则识别 todo 结果是否还缺少基本研究要素。
 //
 // 这里不调用模型 judge，目的是保持预算可控、测试稳定；后续可在外层增加可选模型 judge。
-func todoResearchGaps(plan ResearchTodoPlan, todo ResearchTodo, execution StepExecution) []string {
+func todoResearchGaps(plan ResearchTodoPlan, todo ResearchTodo, execution TodoExecution) []string {
 	gaps := make([]string, 0)
 	gaps = append(gaps, nonEmptyStrings(execution.Gaps)...)
 

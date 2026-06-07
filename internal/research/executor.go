@@ -27,9 +27,9 @@ type ResearcherMetadata interface {
 	ResearcherFocus() string
 }
 
-// Synthesizer 负责把多个 researcher 的结果综合为一个 StepExecution。
+// Synthesizer 负责把多个 researcher 的结果综合为一个 TodoExecution。
 type Synthesizer interface {
-	Synthesize(ctx context.Context, in SynthesisInput) (StepExecution, error)
+	Synthesize(ctx context.Context, in SynthesisInput) (TodoExecution, error)
 }
 
 // ResearcherInput 是传给单个 researcher 的上下文。
@@ -39,7 +39,7 @@ type ResearcherInput struct {
 	// Step 是当前 researcher 需要执行的具体研究步骤。
 	Step ResearchStep
 	// ExecutedSteps 是已完成的依赖或上一轮尝试结果，供当前 researcher 避免重复并补缺口。
-	ExecutedSteps []StepExecution
+	ExecutedSteps []priorResearchView
 	// Focus 是调度层分配给该 researcher 的研究视角。
 	Focus string
 }
@@ -51,7 +51,7 @@ type SynthesisInput struct {
 	// Step 是本轮被综合的研究步骤。
 	Step ResearchStep
 	// ExecutedSteps 是已完成上下文，帮助 synthesizer 判断是否仍有 gap。
-	ExecutedSteps []StepExecution
+	ExecutedSteps []priorResearchView
 	// Results 是所有 researcher 的输出，包括局部失败信息。
 	Results []ResearcherResult
 }
@@ -63,14 +63,14 @@ type StepExecutionInput struct {
 	// Step 是要执行的研究步骤。
 	Step ResearchStep
 	// ExecutedSteps 是 prior context，来自依赖 todo 或 bounded loop 的前几轮尝试。
-	ExecutedSteps []StepExecution
+	ExecutedSteps []priorResearchView
 }
 
 // ParallelStepExecutor 并行运行多个 researcher，并在至少一个成功时进入 synthesis。
 type ParallelStepExecutor struct {
 	// researchers 是并行执行的研究角色列表。
 	researchers []Researcher
-	// synthesizer 负责把 researchers 的输出合并为 StepExecution。
+	// synthesizer 负责把 researchers 的输出合并为 TodoExecution。
 	synthesizer Synthesizer
 }
 
@@ -83,16 +83,16 @@ func NewParallelStepExecutor(researchers []Researcher, synthesizer Synthesizer) 
 //
 // 单个 researcher 失败不会导致整个 step 失败；只有全部 researcher 都失败时才返回错误。
 // 这种策略保证反面视角或 freshness 角色失败时，其他证据仍可进入 synthesis。
-func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecutionInput) (StepExecution, error) {
+func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecutionInput) (TodoExecution, error) {
 	if e == nil {
-		return StepExecution{}, fmt.Errorf("parallel step executor is nil")
+		return TodoExecution{}, fmt.Errorf("parallel step executor is nil")
 	}
 	if isNilDependency(e.synthesizer) {
-		return StepExecution{}, fmt.Errorf("synthesizer is nil")
+		return TodoExecution{}, fmt.Errorf("synthesizer is nil")
 	}
 	for i, researcher := range e.researchers {
 		if isNilDependency(researcher) {
-			return StepExecution{}, fmt.Errorf("researcher %d (%s) is nil", i, roleForIndex(i))
+			return TodoExecution{}, fmt.Errorf("researcher %d (%s) is nil", i, roleForIndex(i))
 		}
 	}
 
@@ -133,7 +133,7 @@ func (e *ParallelStepExecutor) ExecuteStep(ctx context.Context, in StepExecution
 		}
 	}
 	if successes == 0 {
-		return StepExecution{}, allResearchersFailedError(results, researcherErrors)
+		return TodoExecution{}, allResearchersFailedError(results, researcherErrors)
 	}
 
 	return e.synthesizer.Synthesize(ctx, SynthesisInput{

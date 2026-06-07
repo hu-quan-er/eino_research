@@ -43,24 +43,6 @@ type Answer struct {
 	Evidence []ClaimEvidence `json:"evidence,omitempty"`
 }
 
-// StepExecution 表示一个 ResearchStep 被多个 researcher 执行并综合后的结果。
-//
-// 它是 todo 内部 bounded loop 的中间结构，后续会被转换为 TodoExecution。
-type StepExecution struct {
-	// Step 是本轮执行的研究步骤或由 todo 转换来的步骤。
-	Step ResearchStep `json:"step"`
-	// ResearcherResults 保留每个 researcher 的原始输出。
-	ResearcherResults []ResearcherResult `json:"researcher_results"`
-	// Summary 是 synthesizer 对本 step 的综合结论。
-	Summary string `json:"summary"`
-	// Gaps 记录仍未解决的问题或证据缺口，bounded loop 会用它判断是否继续深挖。
-	Gaps []string `json:"gaps,omitempty"`
-	// Sources 是本 step 综合后的来源列表。
-	Sources []search.Source `json:"sources"`
-	// Documents 是本 step 可引用的文本证据。
-	Documents []SourceDocument `json:"documents,omitempty"`
-}
-
 // priorResearchView 是 prior-context 喂给 researcher / synthesizer prompt 的精简投影。
 //
 // 它故意保持与历史 StepExecution 相同的 JSON 形状（step / researcher_results / summary /

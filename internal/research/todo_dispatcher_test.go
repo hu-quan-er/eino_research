@@ -99,10 +99,9 @@ func TestRuleBasedTodoDispatcherAddsGapCheckerForDependencyGaps(t *testing.T) {
 	assertJobRoleIDs(t, jobs, want)
 }
 
-func TestStepExecutionToTodoExecutionPreservesFanoutResults(t *testing.T) {
+func TestFinalizeTodoExecutionPreservesFanoutResults(t *testing.T) {
 	todo := validTodoPlan().Todos[1]
-	step := StepExecution{
-		Step:    todoToResearchStep(todo),
+	execution := TodoExecution{
 		Summary: "combined todo research",
 		ResearcherResults: []ResearcherResult{{
 			Role: "evidence_researcher",
@@ -118,25 +117,25 @@ func TestStepExecutionToTodoExecutionPreservesFanoutResults(t *testing.T) {
 		}},
 	}
 
-	execution := stepExecutionToTodoExecution(todo, step)
+	result := finalizeTodoExecution(todo, execution)
 
-	if execution.Todo.ID != todo.ID {
-		t.Fatalf("todo id = %q, want %q", execution.Todo.ID, todo.ID)
+	if result.Todo.ID != todo.ID {
+		t.Fatalf("todo id = %q, want %q", result.Todo.ID, todo.ID)
 	}
-	if execution.Status != TodoDone {
-		t.Fatalf("status = %q, want %q", execution.Status, TodoDone)
+	if result.Status != TodoDone {
+		t.Fatalf("status = %q, want %q", result.Status, TodoDone)
 	}
-	if execution.Summary != "combined todo research" {
-		t.Fatalf("summary = %q, want combined todo research", execution.Summary)
+	if result.Summary != "combined todo research" {
+		t.Fatalf("summary = %q, want combined todo research", result.Summary)
 	}
-	if len(execution.ResearcherResults) != 1 {
-		t.Fatalf("researcher results = %d, want 1", len(execution.ResearcherResults))
+	if len(result.ResearcherResults) != 1 {
+		t.Fatalf("researcher results = %d, want 1", len(result.ResearcherResults))
 	}
-	if len(execution.Findings) != 1 {
-		t.Fatalf("findings = %d, want 1", len(execution.Findings))
+	if len(result.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(result.Findings))
 	}
-	if len(execution.Sources) != 1 {
-		t.Fatalf("sources = %d, want 1", len(execution.Sources))
+	if len(result.Sources) != 1 {
+		t.Fatalf("sources = %d, want 1", len(result.Sources))
 	}
 }
 

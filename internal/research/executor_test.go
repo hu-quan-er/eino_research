@@ -29,9 +29,8 @@ func (r fakeResearcher) Research(ctx context.Context, in ResearcherInput) (Resea
 
 type fakeSynthesizer struct{}
 
-func (s fakeSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (StepExecution, error) {
-	return StepExecution{
-		Step:              in.Step,
+func (s fakeSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (TodoExecution, error) {
+	return TodoExecution{
 		ResearcherResults: in.Results,
 		Summary:           "combined",
 		Sources:           []search.Source{{ID: "src_1", Title: "combined", URL: "https://example.com/combined"}},

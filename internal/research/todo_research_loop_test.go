@@ -22,14 +22,13 @@ func TestRunTodoResearchLoopRepeatsWhenGapsRemain(t *testing.T) {
 		Todo:                 todo,
 		DependencyExecutions: []TodoExecution{dependency},
 		MaxAttempts:          2,
-		ExecuteStep: func(_ context.Context, in StepExecutionInput) (StepExecution, error) {
+		ExecuteStep: func(_ context.Context, in StepExecutionInput) (TodoExecution, error) {
 			calls++
 			if calls == 1 {
 				if len(in.ExecutedSteps) != 1 {
 					t.Fatalf("first iteration executed steps = %d, want dependency context only", len(in.ExecutedSteps))
 				}
-				return StepExecution{
-					Step:    in.Step,
+				return TodoExecution{
 					Summary: "partial",
 					Gaps:    []string{"missing source-backed evidence"},
 				}, nil
@@ -37,8 +36,7 @@ func TestRunTodoResearchLoopRepeatsWhenGapsRemain(t *testing.T) {
 			if len(in.ExecutedSteps) != 2 {
 				t.Fatalf("second iteration executed steps = %d, want dependency plus first attempt", len(in.ExecutedSteps))
 			}
-			return StepExecution{
-				Step:    in.Step,
+			return TodoExecution{
 				Summary: "complete",
 				ResearcherResults: []ResearcherResult{{
 					Role: "evidence_researcher",
@@ -78,10 +76,9 @@ func TestRunTodoResearchLoopStopsAtMaxAttemptsWithGaps(t *testing.T) {
 		Plan:        plan,
 		Todo:        todo,
 		MaxAttempts: 2,
-		ExecuteStep: func(_ context.Context, in StepExecutionInput) (StepExecution, error) {
+		ExecuteStep: func(_ context.Context, in StepExecutionInput) (TodoExecution, error) {
 			calls++
-			return StepExecution{
-				Step:    in.Step,
+			return TodoExecution{
 				Summary: "still partial",
 				Gaps:    []string{"still missing source-backed evidence"},
 			}, nil
@@ -106,10 +103,9 @@ func TestRunTodoResearchLoopStopsWhenFirstAttemptSatisfiesTodo(t *testing.T) {
 		Plan:        plan,
 		Todo:        todo,
 		MaxAttempts: 3,
-		ExecuteStep: func(_ context.Context, in StepExecutionInput) (StepExecution, error) {
+		ExecuteStep: func(_ context.Context, in StepExecutionInput) (TodoExecution, error) {
 			calls++
-			return StepExecution{
-				Step:    in.Step,
+			return TodoExecution{
 				Summary: "complete",
 				ResearcherResults: []ResearcherResult{{
 					Role: "evidence_researcher",

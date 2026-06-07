@@ -362,12 +362,12 @@ func todoToResearchStep(todo ResearchTodo, plans ...ResearchTodoPlan) ResearchSt
 	}
 }
 
-// dependencyExecutionsAsSteps 将已完成依赖转换为 prior executed steps，供当前 todo researcher
-// 读取上下文。
-func dependencyExecutionsAsSteps(executions []TodoExecution) []StepExecution {
-	steps := make([]StepExecution, 0, len(executions))
+// dependencyResearchViews 把已完成依赖投影为 prior-context view，供当前 todo researcher
+// 读取上下文。故意不带 Documents，保持与历史 prompt 字节一致。
+func dependencyResearchViews(executions []TodoExecution) []priorResearchView {
+	views := make([]priorResearchView, 0, len(executions))
 	for _, execution := range executions {
-		steps = append(steps, StepExecution{
+		views = append(views, priorResearchView{
 			Step:              todoToResearchStep(execution.Todo),
 			ResearcherResults: execution.ResearcherResults,
 			Summary:           execution.Summary,
@@ -375,35 +375,41 @@ func dependencyExecutionsAsSteps(executions []TodoExecution) []StepExecution {
 			Sources:           execution.Sources,
 		})
 	}
-	return steps
+	return views
 }
 
-// stepExecutionToTodoExecution 把并行 researcher + synthesis 的结果转换回 todo 结果。
+// attemptResearchView 把循环内一轮 attempt 投影为 prior-context view（含 documents）。
+func attemptResearchView(execution TodoExecution, step ResearchStep) priorResearchView {
+	return priorResearchView{
+		Step:              step,
+		ResearcherResults: execution.ResearcherResults,
+		Summary:           execution.Summary,
+		Gaps:              execution.Gaps,
+		Sources:           execution.Sources,
+		Documents:         execution.Documents,
+	}
+}
+
+// finalizeTodoExecution 把循环产出的研究结果补齐为完整 TodoExecution。
 //
-// 转换时会再次运行 evidence 归一化，确保最终 TodoExecution.Findings 已带可渲染的证据引用。
-func stepExecutionToTodoExecution(todo ResearchTodo, step StepExecution) TodoExecution {
-	step = normalizeStepExecutionSources(step)
+// 它再次运行 evidence 归一化（normalize 幂等），flatten + enrich findings，并补齐
+// Todo / Status / summary 兜底，使最终 TodoExecution.Findings 已带可渲染的证据引用。
+func finalizeTodoExecution(todo ResearchTodo, execution TodoExecution) TodoExecution {
+	execution = normalizeTodoExecutionSources(execution)
 	findings := make([]Finding, 0)
-	for _, result := range step.ResearcherResults {
+	for _, result := range execution.ResearcherResults {
 		findings = append(findings, result.Findings...)
 	}
-	findings = enrichFindingsEvidence(findings, step.Documents)
+	execution.Findings = enrichFindingsEvidence(findings, execution.Documents)
 
-	summary := strings.TrimSpace(step.Summary)
+	summary := strings.TrimSpace(execution.Summary)
 	if summary == "" {
 		summary = strings.TrimSpace(todo.Title)
 	}
-
-	return TodoExecution{
-		Todo:              todo,
-		Status:            TodoDone,
-		ResearcherResults: step.ResearcherResults,
-		Summary:           summary,
-		Findings:          findings,
-		Gaps:              step.Gaps,
-		Sources:           step.Sources,
-		Documents:         step.Documents,
-	}
+	execution.Summary = summary
+	execution.Todo = todo
+	execution.Status = TodoDone
+	return execution
 }
 
 // nonEmptyStrings 清理字符串数组，保留非空项且保持原顺序。

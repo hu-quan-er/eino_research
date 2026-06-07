@@ -59,9 +59,8 @@ func TestBuildFetchedPageDocumentsUsesFullFetchedText(t *testing.T) {
 	}
 }
 
-func TestNormalizeStepExecutionPrefersFetchedDocumentsOverSnippets(t *testing.T) {
-	step := StepExecution{
-		Step: ResearchStep{ID: "step_1", Question: "What evidence exists?"},
+func TestNormalizeTodoExecutionPrefersFetchedDocumentsOverSnippets(t *testing.T) {
+	execution := TodoExecution{
 		ResearcherResults: []ResearcherResult{{
 			Role: "evidence_researcher",
 			Findings: []Finding{{
@@ -87,7 +86,7 @@ func TestNormalizeStepExecutionPrefersFetchedDocumentsOverSnippets(t *testing.T)
 		}}, 200),
 	}
 
-	normalized := normalizeStepExecutionSources(step)
+	normalized := normalizeTodoExecutionSources(execution)
 
 	if len(normalized.Documents) != 1 {
 		t.Fatalf("documents = %d, want 1", len(normalized.Documents))
@@ -101,9 +100,8 @@ func TestNormalizeStepExecutionPrefersFetchedDocumentsOverSnippets(t *testing.T)
 	}
 }
 
-func TestNormalizeStepExecutionAddsEvidenceRefs(t *testing.T) {
-	step := StepExecution{
-		Step: ResearchStep{ID: "step_1", Question: "What evidence exists?"},
+func TestNormalizeTodoExecutionAddsEvidenceRefs(t *testing.T) {
+	execution := TodoExecution{
 		ResearcherResults: []ResearcherResult{{
 			Role: "evidence_researcher",
 			Findings: []Finding{{
@@ -119,7 +117,7 @@ func TestNormalizeStepExecutionAddsEvidenceRefs(t *testing.T) {
 		}},
 	}
 
-	normalized := normalizeStepExecutionSources(step)
+	normalized := normalizeTodoExecutionSources(execution)
 
 	if len(normalized.Documents) != 1 {
 		t.Fatalf("documents = %d, want 1", len(normalized.Documents))
@@ -139,10 +137,9 @@ func TestNormalizeStepExecutionAddsEvidenceRefs(t *testing.T) {
 	}
 }
 
-func TestStepExecutionToTodoExecutionPreservesDocuments(t *testing.T) {
+func TestFinalizeTodoExecutionPreservesDocuments(t *testing.T) {
 	todo := validTodoPlan().Todos[1]
-	step := StepExecution{
-		Step:    todoToResearchStep(todo),
+	execution := TodoExecution{
 		Summary: "combined",
 		ResearcherResults: []ResearcherResult{{
 			Role: "evidence_researcher",
@@ -159,12 +156,12 @@ func TestStepExecutionToTodoExecutionPreservesDocuments(t *testing.T) {
 		}},
 	}
 
-	execution := stepExecutionToTodoExecution(todo, step)
+	result := finalizeTodoExecution(todo, execution)
 
-	if len(execution.Documents) != 1 {
-		t.Fatalf("documents = %d, want 1", len(execution.Documents))
+	if len(result.Documents) != 1 {
+		t.Fatalf("documents = %d, want 1", len(result.Documents))
 	}
-	if len(execution.Findings) != 1 || len(execution.Findings[0].EvidenceRefs) != 1 {
-		t.Fatalf("findings = %#v, want evidence refs", execution.Findings)
+	if len(result.Findings) != 1 || len(result.Findings[0].EvidenceRefs) != 1 {
+		t.Fatalf("findings = %#v, want evidence refs", result.Findings)
 	}
 }

@@ -161,7 +161,7 @@ Return only a JSON ResearcherResult object.`, in.Question, stepPrompt, string(ex
 	return result, nil
 }
 
-// AgentSynthesizer 使用模型把多个 researcher 输出合并为 StepExecution。
+// AgentSynthesizer 使用模型把多个 researcher 输出合并为 TodoExecution。
 type AgentSynthesizer struct {
 	// model 是用于综合 researcher 输出的 chat model。
 	model model.BaseChatModel
@@ -174,16 +174,16 @@ func NewAgentSynthesizer(m model.BaseChatModel) *AgentSynthesizer {
 
 // Synthesize 综合多个 researcher 输出。
 //
-// 如果模型没有返回合法 JSON，会回退为一个最小 StepExecution，把 researcher 结果和 source
+// 如果模型没有返回合法 JSON，会回退为一个最小 TodoExecution，把 researcher 结果和 source
 // 原样保留下来，避免模型格式问题导致已收集证据全部丢失。
-func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (StepExecution, error) {
+func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (TodoExecution, error) {
 	if s == nil || isNilDependency(s.model) {
-		return StepExecution{}, fmt.Errorf("synthesizer model is nil")
+		return TodoExecution{}, fmt.Errorf("synthesizer model is nil")
 	}
 
 	b, err := json.Marshal(in)
 	if err != nil {
-		return StepExecution{}, fmt.Errorf("marshal synthesis input: %w", err)
+		return TodoExecution{}, fmt.Errorf("marshal synthesis input: %w", err)
 	}
 
 	resp, err := s.model.Generate(ctx, []*schema.Message{
@@ -191,27 +191,22 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 		schema.UserMessage(string(b)),
 	})
 	if err != nil {
-		return StepExecution{}, err
+		return TodoExecution{}, err
 	}
 	if resp == nil {
-		return StepExecution{}, fmt.Errorf("model response is nil")
+		return TodoExecution{}, fmt.Errorf("model response is nil")
 	}
 
 	content := strings.TrimSpace(resp.Content)
 	normalizedResults, researcherSources := normalizeResearcherSources(in.Results)
-	var out StepExecution
+	var out TodoExecution
 	if err := json.Unmarshal([]byte(content), &out); err != nil {
 		// synthesizer 偶发返回非 JSON 时，保留原文作为 summary，并继续向上游传递 researcher 证据。
-		return StepExecution{
-			Step:              in.Step,
+		return TodoExecution{
 			ResearcherResults: normalizedResults,
 			Summary:           content,
 			Sources:           researcherSources,
 		}, nil
-	}
-	if strings.TrimSpace(out.Step.Question) == "" && strings.TrimSpace(out.Step.Title) == "" {
-		// 模型可能省略 step 字段；保留输入 step 让后续 todo 转换仍能定位来源任务。
-		out.Step = in.Step
 	}
 	if len(out.ResearcherResults) == 0 {
 		// 模型可能只返回 summary/sources；此时使用原始 researcher results 补齐可审计细节。
@@ -225,11 +220,11 @@ func (s *AgentSynthesizer) Synthesize(ctx context.Context, in SynthesisInput) (S
 	return out, nil
 }
 
-// normalizeStepExecutionSources 是 step 结果进入上层前的统一证据归一化入口。
+// normalizeTodoExecutionSources 是 todo 结果进入上层前的统一证据归一化入口。
 //
 // 它会合并 researcher sources、生成 documents、重写 finding source IDs，并为缺失的
 // evidence_refs 自动补齐 quote/chunk。
-func normalizeStepExecutionSources(execution StepExecution) StepExecution {
+func normalizeTodoExecutionSources(execution TodoExecution) TodoExecution {
 	results, researcherSources := normalizeResearcherSources(execution.ResearcherResults)
 	sources := mergeSources(researcherSources, execution.Sources)
 	documents := mergeSourceDocuments(execution.Documents, buildSourceDocuments(sources, defaultSourceChunkChars))
