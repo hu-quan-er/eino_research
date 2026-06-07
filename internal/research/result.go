@@ -61,6 +61,25 @@ type StepExecution struct {
 	Documents []SourceDocument `json:"documents,omitempty"`
 }
 
+// priorResearchView 是 prior-context 喂给 researcher / synthesizer prompt 的精简投影。
+//
+// 它故意保持与历史 StepExecution 相同的 JSON 形状（step / researcher_results / summary /
+// gaps / sources / documents），以确保统一执行结果类型后 prompt 内容字节级不变。
+type priorResearchView struct {
+	// Step 是该 prior 单元对应的 researcher 简报。
+	Step ResearchStep `json:"step"`
+	// ResearcherResults 是该 prior 单元的 researcher 原始输出。
+	ResearcherResults []ResearcherResult `json:"researcher_results"`
+	// Summary 是该 prior 单元的综合摘要。
+	Summary string `json:"summary"`
+	// Gaps 是该 prior 单元仍未解决的问题。
+	Gaps []string `json:"gaps,omitempty"`
+	// Sources 是该 prior 单元的来源列表。
+	Sources []search.Source `json:"sources"`
+	// Documents 是该 prior 单元的可引用正文（dependency 投影不含，attempt 投影含）。
+	Documents []SourceDocument `json:"documents,omitempty"`
+}
+
 // ResearcherResult 是单个 researcher agent 的原始研究输出。
 //
 // Sources/Documents/Findings 之后会经过 source ID 归一化和 evidence ref 补齐，因此
